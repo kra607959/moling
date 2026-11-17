@@ -2,10 +2,12 @@
 // 有网时先取新文件（改了代码刷新即见），取到就顺手存一份；断网或网慢（3 秒）时用存着的。
 // 首次装上时把整套文件先存好，之后断网也能开卷。
 'use strict';
-const VERSION = 'moling-21243bd5db';   // tools/build.mjs 打包时换成内容指纹
+const VERSION = 'moling-5d7cc17cc8';   // tools/build.mjs 打包时换成内容指纹
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest',
-  'src/util.js', 'src/gesture.js', 'src/glyph.js', 'src/audio.js', 'src/art.js', 'src/data.js', 'src/scroll.js', 'src/game.js',
+  'src/util.js', 'src/gesture.js', 'src/glyph.js', 'src/audio.js', 'src/art.js', 'src/data.js', 'src/scroll.js',
+  'src/game/core.js', 'src/game/log.js', 'src/game/run.js', 'src/game/entity.js', 'src/game/stroke.js', 'src/game/zi.js', 'src/game/boss.js',
+  'src/game/update.js', 'src/game/draw.js', 'src/game/drawfx.js', 'src/game/hud.js', 'src/game/screens.js', 'src/game/input.js',
   'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/favicon-48.png',
 ];
 
