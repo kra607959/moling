@@ -79,12 +79,14 @@ function drawTitle() {
     if (w2) button('戒印挑战', x + bw + gap, Lt.startY - bh / 2, w2, bh, () => openVows('title'), false, 20 * ps);
     c.globalAlpha = 1;
   }
-  // 设置、卷库、印谱（竖屏手机上放大，手指点得中）
+  // 御笔（横屏双指试作）、设置、卷库、印谱（竖屏手机上放大，手指点得中）
   if (a2 > 0.05) {
-    const ps = PS(), bw = 86 * ps, bh = 40 * ps, g = 10 * ps, fs = 19 * ps;
+    const ps = PS(), bw = (W < 760 ? 80 : 86) * ps, bh = 40 * ps, g = 10 * ps, fs = 19 * ps;
     c.globalAlpha = a2;
     if (installEvt) button('装到主屏', 22, 18, 116 * ps, bh, () => { const ev = installEvt; installEvt = null; ev.prompt(); }, false, fs);
     else if (iosBrowser()) txt('Safari「分享」→「添加到主屏幕」，断网也能玩', 22, 38, 13 * ps, INK, 'left', 0.5, 'normal');
+    button('御笔', W - 22 - 4 * bw - 3 * g, 18, bw, bh, () => Yubi.enter(), false, fs);
+    txt('横屏试作', W - 22 - 3.5 * bw - 3 * g, 18 + bh + 14 * ps, 13 * ps, CINNABAR, 'center', 0.6, 'normal');
     button('设置', W - 22 - 3 * bw - 2 * g, 18, bw, bh, () => openSettings('title'), false, fs);
     button('卷库', W - 22 - 2 * bw - g, 18, bw, bh, () => openGallery('title'), false, fs);
     button('印谱', W - 22 - bw, 18, bw, bh, () => openYinpu('title'), false, fs);

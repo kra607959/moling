@@ -1,11 +1,11 @@
 // 发布版只从已完整预存的那一版开卷。开发版不拦截在线刷新。
 'use strict';
-const VERSION = 'moling-fc310a194b';   // tools/build.mjs 打包时换成内容指纹
+const VERSION = 'moling-54c43a0914';   // tools/build.mjs 打包时换成内容指纹
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest',
-  'releases/fc310a194b/src/util.js', 'releases/fc310a194b/src/gesture.js', 'releases/fc310a194b/src/glyph.js', 'releases/fc310a194b/src/audio.js', 'releases/fc310a194b/src/art.js', 'releases/fc310a194b/src/data.js', 'releases/fc310a194b/src/scroll.js',
-  'releases/fc310a194b/src/game/core.js', 'releases/fc310a194b/src/game/log.js', 'releases/fc310a194b/src/game/run.js', 'releases/fc310a194b/src/game/entity.js', 'releases/fc310a194b/src/game/stroke.js', 'releases/fc310a194b/src/game/zi.js', 'releases/fc310a194b/src/game/boss.js',
-  'releases/fc310a194b/src/game/update.js', 'releases/fc310a194b/src/game/draw.js', 'releases/fc310a194b/src/game/drawfx.js', 'releases/fc310a194b/src/game/hud.js', 'releases/fc310a194b/src/game/screens.js', 'releases/fc310a194b/src/game/input.js',
+  'releases/54c43a0914/src/util.js', 'releases/54c43a0914/src/gesture.js', 'releases/54c43a0914/src/glyph.js', 'releases/54c43a0914/src/audio.js', 'releases/54c43a0914/src/art.js', 'releases/54c43a0914/src/data.js', 'releases/54c43a0914/src/scroll.js',
+  'releases/54c43a0914/src/game/core.js', 'releases/54c43a0914/src/game/log.js', 'releases/54c43a0914/src/game/run.js', 'releases/54c43a0914/src/game/entity.js', 'releases/54c43a0914/src/game/stroke.js', 'releases/54c43a0914/src/game/zi.js', 'releases/54c43a0914/src/game/boss.js',
+  'releases/54c43a0914/src/game/update.js', 'releases/54c43a0914/src/game/draw.js', 'releases/54c43a0914/src/game/drawfx.js', 'releases/54c43a0914/src/game/hud.js', 'releases/54c43a0914/src/game/screens.js', 'releases/54c43a0914/src/yubi.js', 'releases/54c43a0914/src/game/input.js',
   'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/favicon-48.png',
 ];
 

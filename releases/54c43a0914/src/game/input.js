@@ -33,6 +33,8 @@ cv.addEventListener('pointerdown', e => {
   for (const b of UI.buttons) {
     if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { b.fn(); return; }
   }
+  // 御笔：左手、右手各一指，各自捕获
+  if (screen === 'yubi') { if (Yubi.down(e, p)) { try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ } } return; }
   // 卷首：片头里点一下只是跳过片头；开卷要点「落笔开卷」，免得一进来误触就开局、没看见笔匣与设置
   if (screen === 'title') { if (UI.titleT < 2.4) UI.titleT = 9; return; }
   if (screen === 'settings') {
@@ -56,6 +58,11 @@ cv.addEventListener('pointerdown', e => {
 cv.addEventListener('pointermove', e => {
   const p = toWorld(e);
   trackMouse(e, p);
+  if (screen === 'yubi') {
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    Yubi.move(e, (evs.length ? evs : [e]).map(ev => { const q = toWorld(ev); q.t = ev.timeStamp; return q; }));
+    return;
+  }
   if (UI.slide && e.pointerId === activeId) { slideTo(UI.slide, p.x); return; }
   if (UI.drag && e.pointerId === activeId && UI.view) {
     const dt = Math.max(1, e.timeStamp - UI.drag.lt) / 1000;
@@ -73,6 +80,7 @@ cv.addEventListener('pointermove', e => {
   }
 });
 const release = e => {
+  if (screen === 'yubi') { Yubi.up(e, false); return; }
   if (e.pointerId !== activeId) return;
   activeId = null;
   if (UI.slide) { UI.slide = null; return; }
@@ -81,6 +89,7 @@ const release = e => {
 };
 cv.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', e => {
+  if (screen === 'yubi') { Yubi.up(e, true); return; }
   if (e.pointerId !== activeId) return;
   activeId = null; UI.slide = UI.drag = null;
   if (!G) return;
@@ -96,6 +105,7 @@ cv.addEventListener('wheel', e => {
   UI.view.ox = clamp(UI.view.ox + e.deltaY - e.deltaX, 0, viewerMaxOx());
 }, { passive: false });
 window.addEventListener('keydown', e => {
+  if (screen === 'yubi') { Yubi.key(e, true); return; }
   const k = e.key.toLowerCase();
   if (screen === 'play' && G && G.zj) {
     // 书写字诀时：Esc 罢笔，退格/Z 撤一笔，空格/回车 落款
@@ -132,7 +142,8 @@ window.addEventListener('keydown', e => {
     e.preventDefault();
   }
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden && screen === 'play') togglePause(); });
+window.addEventListener('keyup', e => { if (screen === 'yubi') Yubi.key(e, false); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && screen === 'play') togglePause(); if (document.hidden && screen === 'yubi') Yubi.pause(); });
 let resizeTimer = 0;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 120); });
 
@@ -210,6 +221,7 @@ if (DEBUG) {
       return Object.assign(compactLog(G.log), G.log.end ? {} : { end: 'open', floor: G.floor, score: G.score });
     },
     records() { return records.slice(); },
+    yubi() { Yubi.start(); return Yubi.state; },
     // —— 自动试玩（tools/bot.js、tools/sim.mjs）：与真实指针同一条落笔路径 ——
     tick(rdt) { update(rdt || 1 / 60); },
     pen: {

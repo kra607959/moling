@@ -3,14 +3,15 @@
 
 // —— 试玩记录：每局按层记下用时、失印、笔法、字诀与所择心得；设置页导出给开发者（只存本机）——
 const REC_KEY = DEBUG ? 'moling.records.debug' : 'moling.records';
-const REC_MAX = 40;
+const REC_MAX = 40;   // 正传与御笔各留最近 40 局：御笔一局短，别把正传的记录挤掉
 let records = (function () {
   try { const a = JSON.parse(localStorage.getItem(REC_KEY)); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 })();
 function saveRecord(log) {
   const i = records.findIndex(r => r.id === log.id);
   if (i >= 0) records[i] = log; else records.push(log);
-  if (records.length > REC_MAX) records.splice(0, records.length - REC_MAX);
+  const mode = r => r.mode || 'main', same = records.filter(r => mode(r) === mode(log));
+  if (same.length > REC_MAX) { const drop = new Set(same.slice(0, same.length - REC_MAX)); records = records.filter(r => !drop.has(r)); }
   try { localStorage.setItem(REC_KEY, JSON.stringify(records)); } catch (e) { /* 忽略 */ }
 }
 // 小数留一位，去掉内部用的起点字段

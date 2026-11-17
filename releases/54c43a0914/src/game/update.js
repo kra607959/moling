@@ -8,6 +8,7 @@ function update(rdt) {
   UI.flash = Math.max(0, UI.flash - rdt * 2.2);
   if (UI.toasts.length) { UI.toasts[0].t += rdt; if (UI.toasts[0].t > 3.8) UI.toasts.shift(); }
   if (UI.notice && (UI.notice.t += rdt) > 7) UI.notice = null;
+  if (screen === 'yubi') { Yubi.update(rdt); return; }   // 御笔（横屏双指试作）自成一局
   if (screen === 'title' || META[screen]) { UI.titleT += rdt; if (screen === 'scroll') updateViewer(rdt); return; }
   if (!G) return;
   const live = screen === 'play' || screen === 'dying';

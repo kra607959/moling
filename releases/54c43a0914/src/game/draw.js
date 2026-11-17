@@ -35,6 +35,7 @@ function wash(a) { ctx.fillStyle = `rgba(${PAPER},${a})`; ctx.fillRect(0, 0, W, 
 function render() {
   UI.buttons = [];
   const s = DPR * K;
+  if (screen === 'yubi') { Yubi.draw(); ctx.setTransform(s, 0, 0, s, 0, 0); drawToasts(); drawCursor(); return; }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ensurePaper();
   ctx.drawImage(paperCv, 0, 0);
