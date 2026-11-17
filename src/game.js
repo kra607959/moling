@@ -123,7 +123,7 @@
     try { localStorage.setItem(REC_KEY, JSON.stringify(records)); } catch (e) { /* 忽略 */ }
   }
   // 小数留一位，去掉内部用的起点字段
-  const compactLog = L => JSON.parse(JSON.stringify(L, (k, v) => (k === 'kills0' || k === 't0' ? undefined : typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 10) / 10 : v)));
+  const compactLog = L => JSON.parse(JSON.stringify(L, (k, v) => (k === 'kills0' || k === 't0' || k === 'lost0' ? undefined : typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 10) / 10 : v)));
   function deviceInfo() {
     if (typeof navigator === 'undefined') return { os: 'sim' };
     const ua = navigator.userAgent || '';
@@ -132,15 +132,37 @@
     return { os, w: Math.round(window.innerWidth), h: Math.round(window.innerHeight), dpr: window.devicePixelRatio || 1, touch: navigator.maxTouchPoints || 0, app: standalone(), quality: SET.quality, reduceFx: SET.reduceFx };
   }
   function newLog() {
-    return { v: 1, id: G.runId, start: new Date().toISOString(), brush: G.brush, dev: deviceInfo(), input: null, resumes: 0, pauses: 0, floors: [], end: null };
+    const dev = deviceInfo();
+    if (persisted != null) dev.persist = persisted;
+    return { v: 1, ver: GAME_VERSION, id: G.runId, start: new Date().toISOString(), brush: G.brush, dev, input: null, resumes: 0, pauses: 0, floors: [], end: null, scroll: { view: 0, save: 0 } };
+  }
+  // 申请持久存储：印谱、卷库、试玩记录只在本机，免得浏览器清理空间时被一并清掉（结果记进设备信息）
+  let persisted = null;
+  function askPersist() {
+    if (persisted != null || typeof navigator === 'undefined' || !navigator.storage || !navigator.storage.persist) return;
+    persisted = false;
+    navigator.storage.persisted().then(p => p || navigator.storage.persist()).then(p => {
+      persisted = !!p;
+      if (G && G.log && G.log.dev) G.log.dev.persist = persisted;
+    }).catch(() => {});
+  }
+  // 观卷、存图也记进本局（局已结束时补存一次）
+  function logScroll(k) {
+    if (!G || !G.log) return;
+    if (!G.log.scroll) G.log.scroll = { view: 0, save: 0 };
+    G.log.scroll[k]++;
+    if (G.log.end) saveRecord(compactLog(G.log));
   }
   function beginFloorLog(n) {
     if (!G.log) return;
     G.flog = {
       n, kills0: G.stats.kills, t0: G.time, rt: 0, gt: 0, lost: 0, hurt: {},
       strokes: 0, techs: {}, hits: 0, len: 0, dur: 0, multi: 0, dry: 0, locked: 0,
-      zi: { open: 0, ok: 0, fail: 0, cancel: 0, keys: {} }, pauses: 0, frames: 0, slow: 0, resumed: !!G.resumedFloor, clear: false,
+      zi: { open: 0, ok: 0, fail: 0, cancel: 0, keys: {} }, pauses: 0, frames: 0, slow: 0, resumed: !!G.resumedFloor, clear: false, near: 0,
+      hui: 0, chain: 0, mz: 0,   // 回澜倒卷的墨弹、雷雨连劈、月影里被镇住的墨妖
+      bends: [],   // 两个以上弯的笔：[认作, 弯数, 弯跨, 弯距, 拐角笔速÷全笔笔速×100]，校准雷与浪用
     };
+    if (G.floorName) G.flog.tpl = G.floorName;
     G.resumedFloor = false;
     G.log.floors.push(G.flog);
   }
@@ -149,6 +171,17 @@
     if (!f) return;
     f.kills = G.stats.kills - f.kills0;
     f.gt = G.time - f.t0;
+    closeSeg();
+  }
+  // 手编层的分段：每段的游戏用时与失印（每次都按当前重算，开下一段时上一段就定下了）
+  function closeSeg() {
+    const f = G && G.flog, sg = f && f.segs && f.segs[f.segs.length - 1];
+    if (sg) { sg.gt = G.time - sg.t0; sg.lost = f.lost - sg.lost0; }
+  }
+  function beginSeg(name) {
+    const f = G.flog;
+    if (f) { closeSeg(); (f.segs || (f.segs = [])).push({ name, t0: G.time, lost0: f.lost }); }
+    G.segCap = { text: name, t: 0 };
   }
   function endLog(end) {
     if (!G || !G.log || G.log.end) return;
@@ -226,7 +259,7 @@
   }
   function snapRun(phase) {
     if (!G) return;
-    const r = { v: 1, phase, savedAt: Date.now() };
+    const r = { v: 1, ver: GAME_VERSION, phase, savedAt: Date.now() };
     for (const k of RUN_FIELDS) r[k] = G[k];
     if (phase === 'choose' && G.choices) r.choices = G.choices.map(u => u.id);
     r.panels = G.panels.map(p => {
@@ -246,6 +279,7 @@
     const r = pendingRun;
     if (!r) return;
     pendingRun = null;
+    askPersist();
     seedRng((r.runId + r.floor * 7919 + (r.log ? r.log.resumes + 1 : 0) * 131) >>> 0);
     G = blankRun(r.brush);
     for (const k of RUN_FIELDS) if (r[k] !== undefined) G[k] = r[k];
@@ -293,6 +327,7 @@
     if (old) stainCtx.drawImage(old, 0, 0, pw, ph);
     paperCv.width = pw; paperCv.height = ph; paperKey = '';
     sealCv = Art.buildSeal(Math.round(SEAL_SIZE * K * DPR * 1.6));
+    if (G && G.riverDef) compileRivers();
   }
   function currentScene() { return G && screen !== 'title' && !META[screen] ? sceneOf(G.floor) : 1; }
   function ensurePaper() {
@@ -338,6 +373,7 @@
       hint: null, nextHint: null, banner: null, sealShake: 0, god: false, endless: false, lockTipT: -9,
       yi: 0, yiFlash: 0, zj: null, ziFx: null, shan: null, flood: null, allies: [], ziTaught: false,
       log: null, flog: null, panelSeq: 0, resumedFloor: false,
+      floorName: null, riverDef: null, rivers: null, groups: {}, restAt: null, segCap: null,
     };
   }
   function newRun(seed) {
@@ -354,6 +390,7 @@
     G = blankRun(brush);
     G.up = Object.assign({}, BR().up);
     G.ink = inkMax();
+    askPersist();
     G.log = newLog();
     profile.runs++; saveProfile();
     washStains(1);
@@ -371,10 +408,12 @@
     G.zj = null; G.ziFx = null; G.shan = null; G.flood = null; G.allies = [];
     const def = buildFloor(n);
     G.waves = def.waves; G.bossType = def.boss;
+    G.floorName = def.name || null; G.riverDef = def.rivers || null; G.groups = {}; G.restAt = null; G.segCap = null;
+    compileRivers();
     G.introT = 2.8; G.flawless = true; G.ink = inkMax();
     let tip = FLOOR_TIPS[n] || '';
     if (n > FINAL_FLOOR && def.boss) tip = '卷终 · ' + BOSS_NAME[def.boss];
-    G.banner = { sub: floorTitle(n), title: floorSub(n).replace(' · 卷终', ''), tip, t: 0, dur: 3.4 };
+    G.banner = { sub: floorTitle(n), title: floorSub(n).replace(' · 卷终', '') + (def.name ? ' · ' + def.name : ''), tip, t: 0, dur: 3.4 };
     G.hint = G.nextHint; G.nextHint = null;
     // 笔意在上一层末尾攒满、还没用过字诀：开层再提示一次
     if (!G.hint && G.yi >= YI_MAX && !G.stats.zi) G.hint = { icon: 'zi', text: '笔意已满 —— 点按墨印（或按空格），写一个「火」字', t: 0 };
@@ -399,18 +438,49 @@
     G.waveI++;
     const w = G.waves[G.waveI];
     if (!w) return;
-    G.waveStart = G.time;
-    for (const s of w.spawns) G.pending.push(Object.assign({ at: G.time + s.t }, s));
-    if (w.hint) G.hint = { icon: w.hint.icon, text: w.hint.text, t: 0 };
+    G.waveStart = G.time; G.restAt = null;
+    if (w.seg) beginSeg(w.seg);
+    for (const s of w.spawns) {
+      G.pending.push(Object.assign({ at: G.time + s.t }, s));
+      if (s.grp) (G.groups[s.grp] || (G.groups[s.grp] = { left: 0, first: null, last: null, freed: false })).left++;
+    }
+    if (w.hint) { const z = w.hint.zhen && G.up.zhen; G.hint = { icon: z ? 'zhen' : w.hint.icon, text: z ? w.hint.zhen : w.hint.text, t: 0 }; }
   }
   function releasePending() {
     if (!G.pending.length) return;
     const keep = [];
     for (const p of G.pending) {
-      if (p.at <= G.time) { const pos = edgePos(p.side, p.u, p.along, p.out); spawnEnemy(p.type, pos.x, pos.y); }
-      else keep.push(p);
+      if (p.at > G.time) { keep.push(p); continue; }
+      if (p.moon) { spawnMoon(p); continue; }
+      if (p.route && G.rivers && G.rivers[p.route]) { spawnOnRiver(p); continue; }
+      const sd = riverSide(p), pos = edgePos(sd.side, sd.u, p.along, p.out);
+      spawnEnemy(p.type, pos.x, pos.y);
     }
     G.pending = keep;
+  }
+  // —— 月影（卷三 · 夜月 · 其一）——
+  // 墨妖从纸上的月影里现身：现身前 MOON_LEAD 秒月影浮出，越来越浓，外圈刻度走满即现身。
+  // 月影落在「镇」的三角里：现身的墨妖当场定住，在结界里受灼。
+  const MOON_LEAD = 3;
+  function moonPos(p) {
+    const a = p.moon[0] * Math.PI / 180, r = Math.min(p.moon[1], Math.min(W, H) / 2 - 44);
+    return { x: CX + Math.cos(a) * r, y: CY + Math.sin(a) * r };
+  }
+  function spawnMoon(p) {
+    const c = moonPos(p), n = p.n || 1;
+    const ward = G.wards.find(w => pointInPoly(c.x, c.y, w.poly));
+    for (let i = 0; i < n; i++) {
+      const a = i / n * TAU + rnd() * 0.6, r = n > 1 ? 14 + rnd() * 12 : 0;
+      const e = spawnEnemy(p.type, c.x + Math.cos(a) * r, c.y + Math.sin(a) * r);
+      if (ward) e.stun = 2.6;
+    }
+    inkParts(c.x, c.y, 10, 0, 0, 0.8);
+    G.fx.push({ type: 'ring', x: c.x, y: c.y, r: 34, t: 0, dur: 0.45 });
+    if (ward) {
+      charPop('镇', c.x, c.y - 40, 46);
+      Sound.chime();
+      if (G.flog) G.flog.mz += n;
+    }
   }
   function aliveCount() {
     let n = G.newEnemies.length;
@@ -421,8 +491,139 @@
     if (screen !== 'play' || G.introT > 0 || G.waveI < 0) return;
     const w = G.waves[G.waveI];
     const last = G.waveI >= G.waves.length - 1;
-    if (!last && !G.pending.length && (aliveCount() <= w.nextAt || G.time - G.waveStart > w.maxT)) nextWave();
+    if (!last && !G.pending.length && (aliveCount() <= w.nextAt || G.time - G.waveStart > w.maxT)) {
+      // 段间留白：清完一段，先留几秒收墨，再起下一段
+      if (w.rest && G.restAt == null) G.restAt = G.time + w.rest;
+      if (!w.rest || G.time >= G.restAt) nextWave();
+    }
     if (last && !G.pending.length && !G.boss && aliveCount() === 0 && !G.enemies.some(e => !e.dead)) floorClear();
+  }
+
+  // —— 水路（卷二 · 江流 · 其一「回潮」）——
+  // 墨妖随水纹而来：在水上被水流托着走得快，到了岸（或出了回湾）才自己爬向墨印。
+  const FLOW = 55;          // 水流托着走的速度（世界单位 / 游戏秒）
+  const EDDY_HOLD = 1.6;    // 同群墨蠹全进了回湾，再打旋多久才一起出湾
+  const EDDY_MAX = 7;       // 最早一只进湾起，至多等这么久
+  function riverPt(q) {
+    const land = W >= H, L = (land ? W : H) / 2, a = q[0] * L + q[1], b = q[2];
+    return land ? { x: CX + a, y: CY + b } : { x: CX - b, y: CY + a };   // 竖屏：整幅转 90°，上游在上
+  }
+  // 折线磨圆（两遍 Chaikin），给画水带与水纹用
+  function smoothLine(P) {
+    let L = P;
+    for (let k = 0; k < 2; k++) {
+      const o = [L[0]];
+      for (let i = 0; i < L.length - 1; i++) {
+        const a = L[i], b = L[i + 1];
+        o.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 }, { x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+      }
+      o.push(L[L.length - 1]);
+      L = o;
+    }
+    return L;
+  }
+  function compileRivers() {
+    const D = G.riverDef;
+    if (!D) { G.rivers = null; return; }
+    const old = G.rivers || {};
+    G.rivers = {};
+    for (const k in D) {
+      const d = D[k], pts = d.pts.map(riverPt), out = (d.out || []).map(riverPt);
+      let eddy = null;
+      if (d.eddy) {
+        const c = riverPt(d.eddy), a = pts[pts.length - 2], b = pts[pts.length - 1];
+        // 顺着入湾前的水势打旋
+        const dir = Math.sign((b.x - c.x) * (b.y - a.y) - (b.y - c.y) * (b.x - a.x)) || 1;
+        eddy = { x: c.x, y: c.y, r: d.eddy[3], dir };
+      }
+      const line = smoothLine(eddy ? pts.concat([{ x: eddy.x, y: eddy.y }]) : pts);
+      const outLine = eddy && out.length ? [{ x: eddy.x, y: eddy.y }].concat(out) : out.length ? [pts[pts.length - 1]].concat(out) : null;
+      const end = outLine ? outLine[outLine.length - 1] : pts[pts.length - 1];
+      G.rivers[k] = { key: k, kind: d.kind || 'water', pts, out, eddy, line, outLine, end, glow: old[k] ? old[k].glow : 0 };
+    }
+  }
+  // 横屏写的出生边，竖屏时随水路一起转
+  function riverSide(p) {
+    if (!G.riverDef || W >= H) return p;
+    return { side: (p.side + 1) % 4, u: p.side === 0 || p.side === 2 ? p.u : 1 - p.u };
+  }
+  function spawnOnRiver(p) {
+    const Rv = G.rivers[p.route], a = Rv.pts[0], b = Rv.pts[1];
+    const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1, j = p.jit || 0;
+    const extra = { route: p.route, leg: 1, phase: 'in', grp: p.grp || null };
+    if (Rv.kind === 'pass' && p.type === 'chan') extra.stand = rr(290, 340);   // 墨蟾守在山口里，弹顺着来路飞
+    spawnEnemy(p.type, a.x - dy / l * j, a.y + dx / l * j, extra);
+    if (p.grp && G.groups[p.grp]) G.groups[p.grp].left--;
+  }
+  // 到了这个水路点没有：挨近了，或已经比这个点更靠近下一个点（妖多挤着时不至于在点上打转）；
+  // 下一处是回湾时，进了湾边就算到
+  function passed(e, p, nx) {
+    if (Math.hypot(p.x - e.x, p.y - e.y) < 30) return true;
+    if (!nx) return false;
+    const dn = Math.hypot(nx.x - e.x, nx.y - e.y);
+    if (nx.r && dn < nx.r + 30) return true;
+    return dn < Math.hypot(nx.x - p.x, nx.y - p.y) - 6;
+  }
+  // 一只墨妖在水路上的去处：返回要去的点与水流速度；上了岸返回 null（之后直奔墨印）
+  function riverStep(e) {
+    const Rv = G.rivers && G.rivers[e.route];
+    if (!Rv) { e.route = null; return null; }
+    if (e.phase === 'in') {
+      let p = Rv.pts[e.leg];
+      while (p && passed(e, p, Rv.pts[e.leg + 1] || (Rv.eddy && { x: Rv.eddy.x, y: Rv.eddy.y, r: Rv.eddy.r }))) p = Rv.pts[++e.leg];
+      if (p) return Rv.kind === 'pass' ? { x: p.x, y: p.y, flow: 0, pass: true } : { x: p.x, y: p.y, flow: FLOW };
+      if (Rv.eddy && e.grp && G.groups[e.grp] && !G.groups[e.grp].freed) {
+        e.phase = 'eddy'; e.orbR = Rv.eddy.r * (0.3 + 0.7 * e.seed);
+        const g = G.groups[e.grp];
+        if (g.first == null) g.first = G.time;
+        g.last = G.time;
+      } else { e.phase = 'out'; e.oleg = 0; }
+    }
+    if (e.phase === 'eddy') {
+      const g = G.groups[e.grp];
+      if (g && !g.freed) {
+        const E = Rv.eddy, a = Math.atan2(e.y - E.y, e.x - E.x) + 0.7 * E.dir;
+        return { x: E.x + Math.cos(a) * e.orbR, y: E.y + Math.sin(a) * e.orbR, flow: 16 };
+      }
+      e.phase = 'out'; e.oleg = 0;
+    }
+    if (e.phase === 'out') {
+      let p = Rv.out[e.oleg];
+      while (p && passed(e, p, Rv.out[e.oleg + 1])) p = Rv.out[++e.oleg];
+      if (p) return { x: p.x, y: p.y, flow: 20 };
+    }
+    e.route = null; e.phase = null;
+    return null;
+  }
+  function updateRivers(dt) {
+    if (!G.rivers) return;
+    // 回湾：同群的都进了湾、又打旋片刻，才一起出湾
+    for (const k in G.groups) {
+      const g = G.groups[k];
+      if (g.freed) continue;
+      let alive = 0, inE = 0;
+      for (const L of [G.enemies, G.newEnemies]) for (const e of L) if (!e.dead && e.grp === k && e.route) { alive++; if (e.phase === 'eddy') inE++; }
+      if (g.left > 0) continue;
+      if (!alive) { g.freed = true; continue; }
+      if ((inE === alive && G.time - g.last >= EDDY_HOLD) || (g.first != null && G.time - g.first >= EDDY_MAX)) g.freed = true;
+    }
+    // 水纹：有墨妖在这条水上、或将在两秒内入水时显出
+    for (const k in G.rivers) {
+      const Rv = G.rivers[k];
+      let on = G.pending.some(p => p.route === k && p.at - G.time < 2.2);
+      if (!on) for (const e of G.enemies) if (!e.dead && e.route === k) { on = true; break; }
+      Rv.glow += ((on ? 1 : 0) - Rv.glow) * Math.min(1, dt * (on ? 2.2 : 0.9));
+    }
+  }
+  // 浪：把水上的墨妖沿水路推回上游一段（回湾里的推出湾外，重新入湾）
+  function riverPush(e, tao) {
+    const Rv = G.rivers && G.rivers[e.route];
+    if (!Rv) return false;
+    if (e.phase === 'eddy' || e.phase === 'out') { e.phase = 'in'; e.leg = Rv.pts.length - 1; }
+    e.leg = Math.max(1, e.leg - 1);
+    const p = Rv.pts[e.leg - 1], dx = p.x - e.x, dy = p.y - e.y, l = Math.hypot(dx, dy) || 1;
+    e.kx += dx / l * 420; e.ky += dy / l * 420; e.stun = Math.max(e.stun, 1.2 + 0.8 * tao);
+    return true;
   }
 
   // —— 实体 ——
@@ -505,8 +706,10 @@
     // 一笔斩过蛟身多节时，飘字只留第一节，免得叠成一团
     const segBurst = e.type === 'seg' && G.time - (G.segPopT || -9) < 0.3;
     if (e.type === 'seg' && !segBurst) G.segPopT = G.time;
-    if (!segBurst) pop('+' + gain, e.x, e.y - e.r - 6, 13, '90,80,70', 0.9, 'num');
-    Sound.pluck(Math.min(G.combo + 2, 16), 0.3, panOf(e.x));
+    if (!segBurst && !G.batch) pop('+' + gain, e.x, e.y - e.r - 6, 13, '90,80,70', 0.9, 'num');
+    // 一笔封住多只时，拨弦留到封完再合成一声（见 techFeng）
+    if (G.batch) G.batch.push({ i: Math.min(G.combo + 2, 16), pan: panOf(e.x) });
+    else Sound.pluck(Math.min(G.combo + 2, 16), 0.3, panOf(e.x));
     splat(e.x, e.y, e.r, kx || 0, ky || 0);
     for (let i = 0; i < e.drops; i++) spawnDrop(e.x, e.y);
     if (e.type === 'lie') {
@@ -573,12 +776,29 @@
     G.shots.push({ x, y, vx: dx / d * speed, vy: dy / d * speed, r: 6, dead: false, t: 0 });
     Sound.spit(panOf(x));
   }
+  // 回澜：墨弹倒卷，转向最近的墨妖，飞得更快，微微追着它
+  function reflectShot(sh, tao) {
+    let best = null, bd = 600 * 600;
+    for (const e of G.enemies) {
+      if (e.dead || isImmune(e, 'lang')) continue;
+      const q = (e.x - sh.x) ** 2 + (e.y - sh.y) ** 2;
+      if (q < bd) { bd = q; best = e; }
+    }
+    const sp = Math.max(260, Math.hypot(sh.vx, sh.vy) * 1.8);
+    const dx = best ? best.x - sh.x : -sh.vx, dy = best ? best.y - sh.y : -sh.vy, l = Math.hypot(dx, dy) || 1;
+    sh.vx = dx / l * sp; sh.vy = dy / l * sp;
+    sh.rev = true; sh.held = 0; sh.tgt = best; sh.dmg = 1 + tao; sh.t = 0;
+    G.fx.push({ type: 'ring', x: sh.x, y: sh.y, r: 16, t: 0, dur: 0.3 });
+  }
   function cutShot(sh, quiet) {
-    if (sh.dead) return;
+    if (sh.dead || sh.rev) return;
     sh.dead = true;
     G.score += 5;
     inkParts(sh.x, sh.y, 6, sh.vx, sh.vy, 0.6);
-    if (!quiet) { Sound.cut(panOf(sh.x)); pop('截', sh.x, sh.y - 16, 18, INK, 0.5, 'num'); }
+    // 墨弹断成两截，向两侧飞散
+    G.fx.push({ type: 'split', x: sh.x, y: sh.y, vx: sh.vx, vy: sh.vy, r: sh.r, t: 0, dur: 0.5 });
+    if (G.stroke) G.stroke.cuts = (G.stroke.cuts || 0) + 1;
+    if (!quiet) { Sound.snap(panOf(sh.x)); charPop('截', sh.x, sh.y - 30, 44); buzz(18); }
   }
   function spawnDrop(x, y) {
     G.drops.push({ x, y, vx: rr(-70, 70), vy: rr(-70, 70), t: 0, life: 6.5, v: 5 * (lv('xi') ? 1.5 : 1), dead: false });
@@ -640,7 +860,7 @@
     const tw = clamp(16 - (s.speed - 120) * 0.0075, 4, 16) * (0.7 + 0.3 * Math.min(1, inkF * 3.3)) * BR().w;
     s.w = s.pts.length ? s.w * 0.62 + tw * 0.38 : tw;
     const dry = Math.min(0.95, clamp((0.3 - inkF) / 0.3, 0, 1) * 0.75 + clamp((s.speed - 900) / 1800, 0, 0.35) + (BR().dry || 0));
-    s.pts.push({ x, y, w: s.w * 0.5, l: s.len, d: dry });
+    s.pts.push({ x, y, w: s.w * 0.5, l: s.len, d: dry, t: s.lastT });   // t：识别时量拐角减速
   }
   function moveStroke(x, y, t) {
     const s = G.stroke;
@@ -691,7 +911,10 @@
         if (e.dead || s.hit.has(e)) continue;
         if (distToSeg(e.x, e.y, a.x, a.y, b.x, b.y) < e.r + bw) { s.hit.add(e); if (!glances(e, kx, ky)) damage(e, dmg, 'brush', kx, ky); }
       }
-      for (const sh of G.shots) if (!sh.dead && distToSeg(sh.x, sh.y, a.x, a.y, b.x, b.y) < sh.r + bw + 2) cutShot(sh);
+      for (const sh of G.shots) if (!sh.dead && !sh.rev && !sh.held && distToSeg(sh.x, sh.y, a.x, a.y, b.x, b.y) < sh.r + bw + 2) {
+        // 会「浪」时，笔锋碰到的墨弹先拦住，收笔再定：成浪则倒卷回去，否则照常截断
+        if (G.up.lang) { sh.held = s.id; (s.held || (s.held = [])).push(sh); } else cutShot(sh);
+      }
       for (const d of G.drops) if (!d.dead && distToSeg(d.x, d.y, a.x, a.y, b.x, b.y) < pickR()) collectDrop(d);
       for (const c of G.counters) {
         if (!c.cut && !c.inked && c.t > 0 && segIntersect(a.x, a.y, b.x, b.y, c.ax, c.ay, c.bx, c.by)) cutCounter(c, b.x, b.y);
@@ -711,9 +934,11 @@
     if (res.kind === 'zhan' && BR().noZhan) res = Object.assign({}, res, { kind: 'fu' });
     s.kind = res.kind;
     if (screen === 'play') applyTech(res, s);
+    if (s.held) for (const sh of s.held) if (!sh.dead && sh.held === s.id) { sh.held = 0; cutShot(sh); }
     if ((s.kills || 0) >= 3 && s.lowInk) award('kubi');
     if ((s.kills || 0) >= 3) buzz(Math.min(70, 20 + 10 * s.kills), true);
     const f = G.flog;
+    if (f && res.bend && f.bends && f.bends.length < 80) { const b = res.bend; f.bends.push([res.kind, b.n, Math.round(b.span), Math.round(b.gap), b.vr == null ? null : Math.round(b.vr * 100)]); }
     if (f) { f.strokes++; f.techs[res.kind] = (f.techs[res.kind] || 0) + 1; f.len += s.len; f.dur += Math.max(UI.t - (s.rt0 || UI.t), (s.lastT - s.t0) / 1000 || 0); if (s.hit.size) f.hits++; f.multi = Math.max(f.multi, s.kills || 0); }
     G.oldStrokes.push({ pts: s.pts, t: 0, seed: s.seed, kind: res.kind, stamped: false });
     G.stroke = null;
@@ -721,6 +946,7 @@
   }
   function cancelStroke() {
     if (!G || !G.stroke) return;
+    if (G.stroke.held) for (const sh of G.stroke.held) sh.held = 0;   // 拦住的墨弹放走
     G.oldStrokes.push({ pts: G.stroke.pts, t: 0.2, seed: G.stroke.seed, kind: 'cancel', stamped: false });
     G.stroke = null;
     Sound.brush(0, false);
@@ -741,6 +967,7 @@
         if (s.hit.size) Sound.swish(0.3, panOf(s.pts[s.pts.length - 1].x));
         const lockedTip = res.shape === 'zig' && !G.up.lei ? '雷' : res.shape === 'wave' && !G.up.lang ? '浪' : null;
         if (lockedTip && G.flog) G.flog.locked++;
+        if (res.near && !lockedTip) nearClosed(res, s);
         if (lockedTip && G.time - G.lockTipT > 4) {
           G.lockTipT = G.time;
           const p = s.pts[s.pts.length - 1];
@@ -752,6 +979,17 @@
       G.lockTipT = G.time;
       const c = centroidOf(res.poly);
       pop('三角为「镇」，尚未习得', c.x, c.y + 70, 15, '90,80,70', 1.2, 'num');
+    }
+  }
+
+  // 画圈差一点合拢：在缺口处标一道虚线、提示一句（三秒内只提示一次），并记进试玩记录
+  function nearClosed(res, s) {
+    if (G.flog) G.flog.near++;
+    const a = s.pts[0], b = s.pts[s.pts.length - 1];
+    G.fx.push({ type: 'gap', ax: a.x, ay: a.y, bx: b.x, by: b.y, t: 0, dur: 1.1 });
+    if (G.time - (G.nearTipT || -9) > 3) {
+      G.nearTipT = G.time;
+      pop('差一点合拢', (a.x + b.x) / 2, (a.y + b.y) / 2 - 26, 17, '90,80,70', 1.2, 'num');
     }
   }
 
@@ -780,7 +1018,7 @@
     for (const sh of G.shots) if (!sh.dead && distToSeg(sh.x, sh.y, ax, ay, bx, by) < sh.r + 9) cutShot(sh);
     G.fx.push({ type: 'slash', ax, ay, bx, by, t: 0, dur: 0.4 });
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    charPop('斩', mx - d.y * 48, my + d.x * 48, 64);
+    if (!(G.stroke && G.stroke.cuts)) charPop('斩', mx - d.y * 48, my + d.x * 48, 64);   // 这一笔截了墨弹：只留「截」字，不叠「斩」
     Sound.swish(0.6, panOf(mx));
     if (n) { G.hitStop = Math.max(G.hitStop, 0.05); UI.shake = Math.max(UI.shake, 0.25); }
   }
@@ -790,9 +1028,14 @@
     let n = 0;
     // 先收圈内原有的墨滴，本次封杀掉落的墨滴仍需笔锋去收
     for (const d of G.drops) if (!d.dead && pointInPoly(d.x, d.y, poly)) collectDrop(d);
+    G.batch = [];
     for (const e of G.enemies) {
       if (!e.dead && pointInPoly(e.x, e.y, poly)) { if (damage(e, 3 + (BR().fengDmg || 0), 'feng', e.x - c.x, e.y - c.y)) n++; }
     }
+    const batch = G.batch;
+    G.batch = null;
+    let rad = 0;
+    for (const q of poly) rad = Math.max(rad, Math.hypot(q.x - c.x, q.y - c.y));
     for (const sh of G.shots) if (!sh.dead && pointInPoly(sh.x, sh.y, poly)) cutShot(sh, true);
     G.fx.push({ type: 'feng', poly, cx: c.x, cy: c.y, t: 0, dur: 0.7 });
     stampPop('封', c.x, c.y, 54);
@@ -804,14 +1047,24 @@
     Sound.bell(10 + Math.min(n, 4), 0.26); Sound.stamp();
     G.stats.seals += n;
     if (n >= 5) award('wufeng');
+    // 群封：三只以上合成一声和弦、一圈朱边墨爆，按 3 / 5 / 8 只分三档；飘字挪到圈外，不压在妖身上
+    const kills = batch.length;
+    if (kills >= 3) {
+      const tier = kills >= 8 ? 3 : kills >= 5 ? 2 : 1;
+      Sound.chord(kills, panOf(c.x));
+      G.fx.push({ type: 'burst', x: c.x, y: c.y, r: rad, tier, t: 0, dur: 0.75 + 0.15 * tier });
+      if (tier >= 2) { UI.shake = Math.max(UI.shake, 0.2 + 0.15 * tier); Sound.duck(0.35, 0.9); }
+      buzz(tier === 3 ? [30, 30, 60] : 25 + 10 * tier, true);
+    } else for (const b of batch) Sound.pluck(b.i, 0.3, b.pan);
     if (n >= 3) {
       const bonus = n * 15;
       G.score += bonus;
-      pop(`${cnNum(n)}妖同封 +${bonus}`, c.x, c.y + 52, 18, CINNABAR, 1.2, 'num');
+      const ly = c.y + rad + 24 > H - 40 ? c.y - rad - 24 : c.y + rad + 24;
+      pop(`${cnNum(n)}妖同封 +${bonus}`, c.x, ly, 18 + 2 * Math.min(3, n >> 2), CINNABAR, 1.3, 'num');
       addYi(1.2 * n);
-      if (lv('yuan')) { G.ink = Math.min(inkMax(), G.ink + s.cost); pop('圆融 · 墨回', c.x, c.y + 76, 16, INK, 1.2, 'num'); }
+      if (lv('yuan')) { G.ink = Math.min(inkMax(), G.ink + s.cost); pop('圆融 · 墨回', c.x, ly + (ly > c.y ? 24 : -24), 16, INK, 1.2, 'num'); }
     }
-    if (n) G.hitStop = Math.max(G.hitStop, 0.06);
+    if (n) G.hitStop = Math.max(G.hitStop, n >= 8 ? 0.1 : n >= 5 ? 0.08 : 0.06);
   }
 
   function boltPath(x1, y1, x2, y2) {
@@ -836,21 +1089,55 @@
       damage(e, 2, 'lei', e.x - o.x, e.y - o.y);
     });
     if (!cand.length) { const e = P[P.length - 1]; G.fx.push({ type: 'bolt', pts: boltPath(e.x, e.y - 160, e.x, e.y), t: 0, dur: 0.4 }); }
+    // 雷雨：被浪（或「水」）浸湿的墨妖导雷，劈中一只湿妖，雷顺着水汽连到三百单位内的其他湿妖
+    const wet = cand.filter(e => e.wet > 0);
+    if (wet.length) {
+      const hit = new Set(cand), chain = [];
+      for (const e of G.enemies) {
+        if (chain.length >= 8) break;
+        if (e.dead || hit.has(e) || !(e.wet > 0) || isImmune(e, 'lei')) continue;
+        let src = null, bd = 300 * 300;
+        for (const w of wet) { const q = (w.x - e.x) ** 2 + (w.y - e.y) ** 2; if (q < bd) { bd = q; src = w; } }
+        if (src) chain.push([src, e]);
+      }
+      for (const [a, e] of chain) {
+        G.fx.push({ type: 'bolt', pts: boltPath(a.x, a.y, e.x, e.y), t: 0, dur: 0.4 });
+        damage(e, 1, 'lei', e.x - a.x, e.y - a.y);
+      }
+      if (chain.length) {
+        pop('雷雨', c.x, c.y - 100, 22, '40,52,62', 1, 'num');
+        if (G.flog) G.flog.chain += chain.length;
+      }
+    }
     charPop('雷', c.x, c.y - 56, 64);
     UI.flash = 0.45; UI.flashCol = '255,255,250'; UI.shake = Math.max(UI.shake, 0.5);
     Sound.thunder(panOf(c.x));
   }
 
+  // 浪：推开墨妖、伤其一点、浸湿（迟滞，且引雷）；浪头扫过的墨弹倒卷回去打妖（回澜）
+  const WET_T = 3.5;
   function techLang(res) {
     const P = res.P, d = res.dir, band = 70, tao = lv('tao');
+    let up = null;
     for (const e of G.enemies) {
       if (e.dead || e.type === 'xu') continue;
       if (distToPolyline(e.x, e.y, P) < band + e.r) {
-        if (!e.boss) { e.kx += d.x * 380; e.ky += d.y * 380; e.stun = Math.max(e.stun, 1 + 0.8 * tao); }
-        if (tao) damage(e, 1, 'lang', d.x, d.y);
+        // 水上的墨妖逆流推回上游（山口里的推回口里）；平地上的顺着笔势推开
+        const Rv = e.route && G.rivers && G.rivers[e.route];
+        if (!e.boss && Rv && riverPush(e, tao)) { if (Rv.kind !== 'pass') up = up || e; }
+        else if (!e.boss) { e.kx += d.x * 380; e.ky += d.y * 380; e.stun = Math.max(e.stun, 1 + 0.8 * tao); }
+        e.wet = Math.max(e.wet || 0, WET_T);
+        damage(e, 1 + tao, 'lang', d.x, d.y);
       }
     }
-    for (const sh of G.shots) if (!sh.dead && distToPolyline(sh.x, sh.y, P) < band) cutShot(sh, true);
+    if (up) pop('逆流', up.x, up.y - up.r - 22, 18, '40,52,62', 0.9, 'num');
+    let back = null, nb = 0;
+    for (const sh of G.shots) if (!sh.dead && !sh.rev && distToPolyline(sh.x, sh.y, P) < band) { reflectShot(sh, tao); back = back || sh; nb++; }
+    if (back) {
+      pop(nb > 1 ? `回澜 ×${nb}` : '回澜', back.x, back.y - 26, 20, '40,52,62', 1, 'num');
+      Sound.snap(panOf(back.x));
+      if (G.flog) G.flog.hui += nb;
+    }
     G.fx.push({ type: 'wave', pts: P.map(p => ({ x: p.x, y: p.y })), dx: d.x, dy: d.y, t: 0, dur: 0.8 });
     const c = centroidOf(P);
     charPop('浪', c.x - d.y * 64, c.y + d.x * 64, 64);
@@ -961,6 +1248,7 @@
     G.yi = lv('kuang') ? YI_MAX * 0.2 : 0;
     G.stats.zi++;
     G.ziSet[key] = 1;
+    Sound.duck(0.3, 1.6);
     if (G.flog) { G.flog.zi.ok++; G.flog.zi.keys[key] = (G.flog.zi.keys[key] || 0) + 1; }
     if (ZI_ORDER.every(k => G.ziSet[k])) award('sizi');
     const B = ziBox();
@@ -1367,6 +1655,7 @@
       updateParts(live ? dt : rdt);
       if (G.banner) { G.banner.t += rdt; if (G.banner.t > G.banner.dur) G.banner = null; }
       if (G.hint) G.hint.t += rdt;
+      if (G.segCap && (G.segCap.t += rdt) > 3.4) G.segCap = null;
       G.sealShake = Math.max(0, G.sealShake - rdt * 3);
     }
     if (screen === 'play') updatePlay(dt, rdt);
@@ -1381,6 +1670,7 @@
       if (G.introT <= 0) { if (G.bossType) spawnBoss(G.bossType); nextWave(); }
     }
     releasePending();
+    updateRivers(dt);
     G.ink = Math.min(inkMax(), G.ink + inkRegen() * dt);
     if (G.comboT > 0) { G.comboT -= dt; if (G.comboT <= 0) G.combo = 0; }
     processContacts();
@@ -1439,18 +1729,26 @@
       const ux = dx / d, uy = dy / d;
       // 远处赶路加速：长边（竖屏的上下、横屏的左右）出生的墨妖不至于走太久
       const far = 1 + clamp((d - 460) / 260, 0, 1) * 1.2;
-      let mx = ux, my = uy, v = e.speed * sm * slow * far;
+      let mx = ux, my = uy, v = e.speed * sm * slow * far, wob = 1;
+      const rv = e.route ? riverStep(e) : null;
+      if (rv) {
+        // 水上：顺着水路走，水流托着走得快，左右晃得少些
+        const tx = rv.x - e.x, ty = rv.y - e.y, tl = Math.hypot(tx, ty) || 1;
+        mx = tx / tl; my = ty / tl; v = (e.speed * far + rv.flow) * sm * slow; wob = 0.4;
+      }
       if (e.type === 'e') {
-        const lat = Math.sin(e.t * 3.2 + e.seed * 6) * 1.2;
-        mx = ux - uy * lat; my = uy + ux * lat;
+        const lat = Math.sin(e.t * 3.2 + e.seed * 6) * 1.2 * wob, bx = mx, by = my;
+        mx = bx - by * lat; my = by + bx * lat;
         const l = Math.hypot(mx, my); mx /= l; my /= l;
       } else if (e.type === 'du' || e.type === 'lie' || e.type === 'xu') {
-        const w = Math.sin(e.t * 2 + e.seed * 9) * 0.35, c = Math.cos(w), s = Math.sin(w);
+        const w = Math.sin(e.t * 2 + e.seed * 9) * 0.35 * wob, c = Math.cos(w), s = Math.sin(w);
         const ox = mx; mx = ox * c - my * s; my = ox * s + my * c;
-      } else if (e.type === 'chan' && d <= e.stand) {
+      } else if (e.type === 'chan' && (!rv || rv.pass) && d <= e.stand) {
         v = 0;
         e.shootT -= dt;
+        const was = e.charging;
         e.charging = e.shootT < 0.6;
+        if (e.charging && !was) Sound.charge(panOf(e.x));   // 蓄力：鼓腮之外再给一声，背后也听得见
         if (e.shootT <= 0) { fireShot(e.x + ux * e.r, e.y + uy * e.r, CX, CY, 105 * sm); e.shootT = rr(2.8, 3.6); e.charging = false; }
       }
       e.x += mx * v * dt; e.y += my * v * dt;
@@ -1486,6 +1784,26 @@
     for (const s of G.shots) {
       if (s.dead) continue;
       s.t += dt;
+      if (s.rev) {
+        // 倒卷的墨弹：不伤印、不撞结界，打中第一只墨妖
+        const tg = s.tgt;
+        if (tg && !tg.dead) {
+          const sp = Math.hypot(s.vx, s.vy), b = Math.atan2(s.vy, s.vx);
+          const nb = b + clamp(wrapAng(Math.atan2(tg.y - s.y, tg.x - s.x) - b), -3.2 * dt, 3.2 * dt);
+          s.vx = Math.cos(nb) * sp; s.vy = Math.sin(nb) * sp;
+        }
+        s.x += s.vx * dt; s.y += s.vy * dt;
+        for (const e of G.enemies) {
+          if (e.dead || Math.hypot(e.x - s.x, e.y - s.y) > e.r + s.r) continue;
+          s.dead = true;
+          inkParts(s.x, s.y, 6, s.vx, s.vy, 0.6);
+          if (!isImmune(e, 'lang')) damage(e, s.dmg || 1, 'lang', s.vx, s.vy);
+          break;
+        }
+        if (s.t > 4 || s.x < -80 || s.x > W + 80 || s.y < -80 || s.y > H + 80) s.dead = true;
+        continue;
+      }
+      if (s.held) continue;   // 被笔锋拦着，等收笔
       for (const w of G.wards) if (pointInPoly(s.x, s.y, w.poly)) { s.dead = true; inkParts(s.x, s.y, 5, 0, 0, 0.5); sparks(s.x, s.y, 3); break; }
       if (s.dead) continue;
       s.x += s.vx * dt; s.y += s.vy * dt;
@@ -1629,11 +1947,26 @@
     G.choices = null;
     startFloor(G.floor + 1);
   }
-  function toGameOver() { screen = 'over'; recordBest(); bankKills(); capturePanel(true); finishScroll('fall'); endLog('fall'); dropRun(); }
+  function toGameOver() { screen = 'over'; UI.endT = UI.t; recordBest(); bankKills(); capturePanel(true); finishScroll('fall'); endLog('fall'); dropRun(); }
   // 三卷尽净：局面存档撤掉，画心留着（若续卷，接着存）
-  function toVictory() { screen = 'victory'; recordBest(); finishScroll('win'); endLog('win'); dropRun(true); Sound.arpeggio(true); Sound.setAmbient(false); }
+  function toVictory() { screen = 'victory'; UI.endT = UI.t; recordBest(); finishScroll('win'); endLog('win'); dropRun(true); Sound.arpeggio(true); Sound.setAmbient(false); }
   function continueEndless() { G.endless = true; if (G.log) G.log.end = null; G.choices = rollUpgrades(); screen = 'choose'; snapRun('choose'); }
-  function toTitle() { screen = 'title'; UI.titleT = 0; Sound.setAmbient(false); paperKey = ''; }
+  function toTitle() { screen = 'title'; UI.titleT = 9; Sound.setAmbient(false); paperKey = ''; }
+  // 暂停里回卷首：本层开头的存档还在就留着（卷首可「接着画」，从本层开头再来，与关了页再开一样），
+  // 这半层也记进记录；第一层没有存档，记作中途罢手
+  function leaveToTitle() {
+    cancelStroke();
+    if (G && G.log && !G.log.end) {
+      const r = loadPending();
+      if (r && r.runId === G.runId && r.phase === 'play' && r.floor === G.floor) {
+        closeFloorLog();
+        r.log = JSON.parse(JSON.stringify(G.log));
+        try { localStorage.setItem(RUN_KEY, JSON.stringify(r)); } catch (e) { /* 存不下就只留原存档 */ }
+        pendingRun = r;
+      } else endLog('quit');
+    }
+    toTitle();
+  }
   function togglePause() {
     if (screen === 'play') { cancelStroke(); screen = 'pause'; Sound.setAmbient(false); if (G.log) G.log.pauses++; if (G.flog) G.flog.pauses++; }
     else if (screen === 'pause') { screen = 'play'; Sound.setAmbient(true); }
@@ -1786,6 +2119,12 @@
 
   function drawWorld() {
     const c = ctx, t = UI.t;
+    if (G.rivers) for (const k in G.rivers) { const Rv = G.rivers[k]; (Rv.kind === 'pass' ? Art.drawPass : Art.drawRiver)(c, Rv, t, Rv.glow, CX, CY); }
+    for (const p of G.pending) {
+      if (!p.moon) continue;
+      const k = 1 - (p.at - G.time) / MOON_LEAD;
+      if (k > 0) { const q = moonPos(p); Art.drawMoon(c, q.x, q.y, Math.min(1, k), t, p.n || 1); }
+    }
     for (const w of G.wards) drawWard(w);
     for (const k of G.counters) drawCounter(k);
     for (const d of G.drops) if (!d.dead) Art.drawDrop(c, d, t);
@@ -1793,6 +2132,13 @@
     if (G.shan) drawShan(G.shan);
     if (G.flood) drawFlood(G.flood);
     for (const e of G.enemies) if (!e.dead && e.type !== 'seg') Art.drawEnemy(c, e, t);
+    // 浸湿的墨妖：身上一圈水光（导雷）
+    c.lineWidth = 1.6;
+    for (const e of G.enemies) {
+      if (e.dead || !(e.wet > 0)) continue;
+      c.strokeStyle = `rgba(40,52,62,${Math.min(1, e.wet) * (0.32 + 0.12 * Math.sin(t * 6 + e.seed * 9))})`;
+      c.beginPath(); c.arc(e.x, e.y, e.r + 5, 0.3, Math.PI - 0.3); c.stroke();
+    }
     if (G.boss && G.boss.type === 'jiao') for (const ch of G.boss.chains) Art.drawChain(c, ch, t);
     for (const e of G.enemies) if (!e.dead && e.fire > 0) drawFlame(e);
     for (const m of G.allies) drawPaperMan(m);
@@ -2054,6 +2400,49 @@
           c.beginPath(); c.arc(f.x, f.y, f.r * (1 + p * 0.6), 0, TAU); c.stroke();
           break;
         }
+        case 'burst': {
+          // 群封墨爆：朱边墨圈外扩；五只以上加飞溅墨线，八只以上再一圈
+          const e = easeOut(Math.min(1, p * 1.3)), a = 1 - p, R0 = f.r * (1 + 0.32 * e);
+          c.strokeStyle = `rgba(${CINNABAR},${0.75 * a})`; c.lineWidth = 3 + f.tier;
+          c.beginPath(); c.arc(f.x, f.y, R0, 0, TAU); c.stroke();
+          c.strokeStyle = `rgba(${INK},${0.35 * a})`; c.lineWidth = 8 + 3 * f.tier;
+          c.beginPath(); c.arc(f.x, f.y, R0 - 6, 0, TAU); c.stroke();
+          if (f.tier >= 2) {
+            const n = 10 + 6 * f.tier;
+            c.strokeStyle = `rgba(${INK},${0.55 * a})`; c.lineCap = 'round';
+            for (let i = 0; i < n; i++) {
+              const ang = i / n * TAU + f.x * 0.01, l0 = R0 + 4, l1 = R0 + 10 + 22 * e * (0.6 + 0.4 * Math.sin(i * 7.3));
+              c.lineWidth = 2.4 * a + 0.6;
+              c.beginPath(); c.moveTo(f.x + Math.cos(ang) * l0, f.y + Math.sin(ang) * l0); c.lineTo(f.x + Math.cos(ang) * l1, f.y + Math.sin(ang) * l1); c.stroke();
+            }
+          }
+          if (f.tier >= 3) {
+            c.strokeStyle = `rgba(${CINNABAR},${0.45 * a})`; c.lineWidth = 1.6;
+            c.beginPath(); c.arc(f.x, f.y, R0 * (1 + 0.25 * e), 0, TAU); c.stroke();
+          }
+          break;
+        }
+        case 'split': {
+          // 截断的墨弹：两截向两侧飞开、淡去
+          const l = Math.hypot(f.vx, f.vy) || 1, ux = f.vx / l, uy = f.vy / l, e = easeOut(p), a = 1 - p;
+          for (const sd of [-1, 1]) {
+            const x = f.x + (-uy * sd * 16 + ux * 10) * e, y = f.y + (ux * sd * 16 + uy * 10) * e;
+            c.save(); c.translate(x, y); c.rotate(Math.atan2(uy, ux) + sd * 0.9 * e);
+            c.fillStyle = `rgba(${INK},${0.85 * a})`;
+            c.beginPath(); c.arc(0, 0, f.r * 0.8, sd < 0 ? Math.PI : 0, sd < 0 ? TAU : Math.PI); c.closePath(); c.fill();
+            c.restore();
+          }
+          c.strokeStyle = `rgba(255,252,240,${0.9 * a})`; c.lineWidth = 1.5;
+          c.beginPath(); c.moveTo(f.x - uy * 12, f.y + ux * 12); c.lineTo(f.x + uy * 12, f.y - ux * 12); c.stroke();
+          break;
+        }
+        case 'gap': {
+          // 差一点合拢：首尾之间画一道朱色虚线，告诉玩家缺口在哪
+          const a = p < 0.2 ? p / 0.2 : 1 - (p - 0.2) / 0.8;
+          c.setLineDash([4, 5]); c.strokeStyle = `rgba(${CINNABAR},${0.7 * a})`; c.lineWidth = 2;
+          c.beginPath(); c.moveTo(f.ax, f.ay); c.lineTo(f.bx, f.by); c.stroke(); c.setLineDash([]);
+          break;
+        }
         case 'fly': {
           const e = easeOut(p) * easeOut(p);
           const x = lerp(f.x, 60, e), y = lerp(f.y, 29, e) - Math.sin(p * Math.PI) * 30;
@@ -2101,7 +2490,7 @@
     // 墨
     txt('墨', x0 + 10, y0 + 9, 22, INK);
     // 窄屏（竖屏手机）上墨条随层名宽度收窄，避免数字与层名相撞
-    const title = floorTitle(G.floor) + ' · ' + floorSub(G.floor);
+    const title = floorTitle(G.floor) + ' · ' + floorSub(G.floor) + (G.floorName ? ' · ' + G.floorName : '');
     ctx.font = `bold 17px ${FONT}`;
     const titleHalf = ctx.measureText(title).width / 2;
     const bx = x0 + 28, bh = 14, f = clamp(G.ink / inkMax(), 0, 1);
@@ -2129,6 +2518,11 @@
         c.fillStyle = i <= G.waveI ? `rgba(${INK},0.75)` : `rgba(${INK},0.18)`;
         c.beginPath(); c.arc(CX + (i - (G.waves.length - 1) / 2) * 12, y0 + 27, 3, 0, TAU); c.fill();
       }
+    }
+    // 手编层的段名：起段时淡淡写出，片刻即隐
+    if (G.segCap && screen === 'play') {
+      const st = G.segCap.t, a = Math.min(1, st / 0.4) * clamp((3.4 - st) / 0.8, 0, 1);
+      txt(Array.from(G.segCap.text).join(' '), CX, y0 + 54, 24, INK, 'center', 0.7 * a);
     }
     // 分
     txt(String(G.score), W - 66, y0 + 9, 22, INK, 'right');
@@ -2185,7 +2579,11 @@
   // 卡顿提示：开局后若常掉到 40 帧以下，提示一次可换省电画质（每台设备只提示一次）
   const perf = { n: 0, slow: 0 };
   function watchPerf(rdt) {
-    if (screen === 'play' && G && G.flog && !document.hidden) { G.flog.frames++; if (rdt > 0.025) G.flog.slow++; }
+    if (screen === 'play' && G && G.flog && !document.hidden) {
+      const f = G.flog, sg = f.segs && f.segs[f.segs.length - 1], slow = rdt > 0.025;
+      f.frames++; if (slow) f.slow++;
+      if (sg) { sg.frames = (sg.frames || 0) + 1; if (slow) sg.slow = (sg.slow || 0) + 1; }   // 手编层按段记，看最忙的一段卡不卡
+    }
     if (SET.perfHinted || SET.quality === 'lo' || screen !== 'play' || document.hidden) return;
     perf.n++;
     if (rdt > 0.025) perf.slow++;
@@ -2320,10 +2718,11 @@
     let uy = top + (list.length + 1) * rowH + 6 * ps;
     if (ups.length) wrap('心得：' + ups.join('　'), W - 60, 15 * ps).forEach((ln, i) => { txt(ln, CX, uy, 15 * ps, INK, 'center', 0.6, 'normal'); uy += 22 * ps; });
     const by = Math.max(top + (list.length + 1) * rowH + 36 * ps, uy + 8 * ps), bh = 42 * ps, fs = 19 * ps;
-    const bs = Math.min(ps, (W - 40) / 460), g = 12 * bs;
-    let bx = CX - (100 + 120 + 90 + 90 + 36) * bs / 2;
+    const bs = Math.min(ps, (W - 40) / 580), g = 12 * bs;
+    let bx = CX - (100 + 120 + 120 + 90 + 90 + 48) * bs / 2;
     button('继续', bx, by, 100 * bs, bh, togglePause, true, fs); bx += 100 * bs + g;
     button('重新开卷', bx, by, 120 * bs, bh, () => newRun(), false, fs); bx += 120 * bs + g;
+    button('回到卷首', bx, by, 120 * bs, bh, leaveToTitle, false, fs); bx += 120 * bs + g;
     button('设置', bx, by, 90 * bs, bh, () => openSettings('pause'), false, fs); bx += 90 * bs + g;
     button(Sound.isMuted() ? '开声' : '静音', bx, by, 90 * bs, bh, () => { Sound.init(); Sound.toggleMute(); }, false, fs);
     if (ps === 1) txt('P / Esc 暂停或继续　·　M 静音　·　V 减弱震屏与闪光' + (SET.reduceFx ? '（已减弱）' : ''), CX, by + 70, 14, INK, 'center', 0.55, 'normal');
@@ -2343,28 +2742,59 @@
     txt(ch, 0, s * 0.03, s * 0.75, '245,233,218', 'center', a);
     ctx.restore();
   }
+  // 一排按钮居中；竖屏放不下就折成几排。返回末排底边
+  function buttonRow(list, y, ps) {
+    const g = 12 * ps, bh = 46 * ps, fs = 19 * ps, rows = [[]];
+    let w = 0;
+    for (const b of list) {
+      const bw = b.w * ps;
+      if (rows[rows.length - 1].length && w + g + bw > W - 40) { rows.push([]); w = 0; }
+      w += (w ? g : 0) + bw; rows[rows.length - 1].push(b);
+    }
+    rows.forEach((row, i) => {
+      let x = CX - (row.reduce((a, b) => a + b.w * ps, 0) + g * (row.length - 1)) / 2;
+      for (const b of row) { button(b.label, x, y + i * (bh + g), b.w * ps, bh, b.fn, b.primary, fs); x += b.w * ps + g; }
+    });
+    return y + rows.length * (bh + g) - g;
+  }
+  // 局终的字：竖屏放大，长行折开
+  function endLines(lines, y, ps) {
+    for (const s of lines) for (const ln of wrap(s, W - 60, 17 * ps)) { txt(ln, CX, y, 17 * ps, INK, 'center', 0.8, 'normal'); y += 30 * ps; }
+    return y;
+  }
+  function endButtons(list, y, ps, note) {
+    const a = clamp((UI.t - (UI.endT || 0) - 0.5) / 0.35, 0, 1);   // 半秒后才浮出：印碎时手指多半还在纸上
+    if (a <= 0) return;
+    ctx.globalAlpha = a;
+    const yb = buttonRow(list, y, ps);
+    txt(note, CX, yb + 30 * ps, 14 * ps, INK, 'center', 0.5, 'normal');
+    ctx.globalAlpha = 1;
+  }
   function drawOver() {
     wash(0.8);
-    drawStamp('碎', CX, H * 0.26, 96, 1);
-    txt('印碎卷残', CX, H * 0.26 + 96, 34, INK);
-    statLines().forEach((s, i) => txt(s, CX, H * 0.26 + 150 + i * 30, 17, INK, 'center', 0.8, 'normal'));
-    const by = H * 0.26 + 260;
-    button('再落一笔', CX - 196, by, 130, 46, () => newRun(), true);
-    button('观卷', CX - 54, by, 108, 46, () => openCurrentScroll('over'));
-    button('回到卷首', CX + 66, by, 130, 46, toTitle);
-    txt('此局墨迹已裱成画卷，存入卷库', CX, by + 70, 14, INK, 'center', 0.5, 'normal');
+    const ps = PS(), y0 = H * (ps > 1 ? 0.22 : 0.26);
+    drawStamp('碎', CX, y0, 96 * ps, 1);
+    txt('印碎卷残', CX, y0 + 96 * ps, 34 * ps, INK);
+    const y = endLines(statLines(), y0 + 150 * ps, ps);
+    endButtons([
+      { label: '再落一笔', w: 130, fn: () => newRun(), primary: true },
+      { label: '观卷', w: 108, fn: () => openCurrentScroll('over') },
+      { label: '回到卷首', w: 130, fn: toTitle },
+    ], y + 20 * ps, ps, '此局墨迹已裱成画卷，存入卷库');
   }
   function drawVictory() {
     wash(0.8);
-    drawStamp('復', CX, H * 0.24, 96, 1);
-    txt('画卷已净', CX, H * 0.24 + 96, 36, INK);
-    txt('三卷墨妖尽伏。纸上的墨迹，渐渐淡回山水。', CX, H * 0.24 + 136, 17, INK, 'center', 0.75, 'normal');
-    statLines().forEach((s, i) => txt(s, CX, H * 0.24 + 176 + i * 30, 17, INK, 'center', 0.8, 'normal'));
-    const by = H * 0.24 + 290;
-    button('续卷（无尽）', CX - 226, by, 160, 46, continueEndless, true);
-    button('观卷', CX - 54, by, 108, 46, () => openCurrentScroll('victory'));
-    button('重新开卷', CX + 66, by, 140, 46, () => newRun());
-    txt('九层墨迹已裱成画卷，存入卷库；续卷终了时卷尾续接', CX, by + 70, 14, INK, 'center', 0.5, 'normal');
+    const ps = PS(), y0 = H * (ps > 1 ? 0.2 : 0.24);
+    drawStamp('復', CX, y0, 96 * ps, 1);
+    txt('画卷已净', CX, y0 + 96 * ps, 36 * ps, INK);
+    let y = endLines(['三卷墨妖尽伏。纸上的墨迹，渐渐淡回山水。'], y0 + 136 * ps, ps);
+    y = endLines(statLines(), y + 10 * ps, ps);
+    endButtons([
+      { label: '续卷（无尽）', w: 160, fn: continueEndless, primary: true },
+      { label: '观卷', w: 108, fn: () => openCurrentScroll('victory') },
+      { label: '重新开卷', w: 130, fn: () => newRun() },
+      { label: '回到卷首', w: 130, fn: toTitle },
+    ], y + 20 * ps, ps, '九层墨迹已裱成画卷，存入卷库；续卷终了时卷尾续接');
   }
 
   // —— 卷首：题名、笔匣 ——
@@ -2420,21 +2850,28 @@
         button('新开一卷', bx + w1 + g, Lt.startY - bh / 2, w2, bh, () => newRun(), false, 20 * ps);
         c.globalAlpha = 1;
       }
-    } else txt('点击空白处 · 落笔开卷', CX, Lt.startY, 22, INK, 'center', a2 * (0.45 + 0.4 * Math.sin(t * 3) ** 2));
-    // 卷库、印谱
-    if (a2 > 0.05) {
+    } else if (a2 > 0.3) {
+      const ps = PS(), bh = 50 * ps, bw = 180 * ps;
       c.globalAlpha = a2;
-      if (installEvt) button('装到主屏', 22, 18, 116, 40, () => { const ev = installEvt; installEvt = null; ev.prompt(); });
-      else if (iosBrowser()) txt('Safari「分享」→「添加到主屏幕」，断网也能玩', 22, 38, 13, INK, 'left', 0.5, 'normal');
-      button('设置', W - 300, 18, 86, 40, () => openSettings('title'));
-      button('卷库', W - 204, 18, 86, 40, () => openGallery('title'));
-      button('印谱', W - 108, 18, 86, 40, () => openYinpu('title'));
-      txt(`${sealCount()} / ${SEALS.length}`, W - 65, 72, 13, INK, 'center', 0.5, 'normal');
+      button('落笔开卷', CX - bw / 2, Lt.startY - bh / 2, bw, bh, () => newRun(), true, 22 * ps);
+      c.globalAlpha = 1;
+    }
+    // 设置、卷库、印谱（竖屏手机上放大，手指点得中）
+    if (a2 > 0.05) {
+      const ps = PS(), bw = 86 * ps, bh = 40 * ps, g = 10 * ps, fs = 19 * ps;
+      c.globalAlpha = a2;
+      if (installEvt) button('装到主屏', 22, 18, 116 * ps, bh, () => { const ev = installEvt; installEvt = null; ev.prompt(); }, false, fs);
+      else if (iosBrowser()) txt('Safari「分享」→「添加到主屏幕」，断网也能玩', 22, 38, 13 * ps, INK, 'left', 0.5, 'normal');
+      button('设置', W - 22 - 3 * bw - 2 * g, 18, bw, bh, () => openSettings('title'), false, fs);
+      button('卷库', W - 22 - 2 * bw - g, 18, bw, bh, () => openGallery('title'), false, fs);
+      button('印谱', W - 22 - bw, 18, bw, bh, () => openYinpu('title'), false, fs);
+      txt(`${sealCount()} / ${SEALS.length}`, W - 22 - bw / 2, 18 + bh + 14 * ps, 13 * ps, INK, 'center', 0.5, 'normal');
       c.globalAlpha = 1;
     }
     if (pendingRun) txt(resumeLine(pendingRun), CX, H - 52, 15, INK, 'center', 0.7, 'normal');
     else txt('鼠标或手指按住拖动作画　·　← → 换笔　·　P 暂停　·　M 静音' + (Sound.isMuted() ? '（已静音）' : ''), CX, H - 52, 14, INK, 'center', 0.5, 'normal');
     if (best.score) txt(`最佳　${best.score} 分　·　至第 ${best.floor} 层`, CX, H - 28, 14, INK, 'center', 0.5, 'normal');
+    txt('v' + GAME_VERSION, W - 12, H - 12, 11, INK, 'right', 0.32, 'normal');
   }
   function drawRack(Lt, a) {
     if (a <= 0) return;
@@ -2651,6 +3088,7 @@
     const s = G.saved;
     openViewer(s.rec, from);
     UI.view.img = s.cv; UI.view.saved = s;
+    logScroll('view');
     Sound.ziEnter();
   }
   function viewerLayout() {
@@ -2666,6 +3104,7 @@
     const v = UI.view;
     if (!v || !v.img) return;
     const blob = v.stored ? v.stored.img : v.saved && v.saved.stored ? v.saved.stored.img : null;
+    if (v.saved) logScroll('save');
     if (blob) Scroll.download(blob, Scroll.fileName(v.rec));
     else if (v.saved) Scroll.toBlob(v.saved.cv, 'image/jpeg', 0.86).then(b => Scroll.download(b, Scroll.fileName(v.rec)));
     v.toast = UI.t;
@@ -2782,7 +3221,8 @@
     for (const b of UI.buttons) {
       if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { b.fn(); return; }
     }
-    if (screen === 'title') { if (!pendingRun) newRun(); return; }
+    // 卷首：片头里点一下只是跳过片头；开卷要点「落笔开卷」，免得一进来误触就开局、没看见笔匣与设置
+    if (screen === 'title') { if (UI.titleT < 2.4) UI.titleT = 9; return; }
     if (screen === 'settings') {
       const sl = UI.sliders.find(q => p.x >= q.x - 14 && p.x <= q.x + q.w + 14 && p.y >= q.y && p.y <= q.y + q.h);
       if (sl) { activeId = e.pointerId; UI.slide = sl; try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ } slideTo(sl, p.x); }

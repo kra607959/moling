@@ -713,12 +713,134 @@ var Art = (function () {
     eyes(c, h.x + fx * h.r * 0.2, h.y + fy * h.r * 0.2, h.r * 0.9, a, true, 0.55);
   }
 
+  // —— 水路引导（回潮）——
+  // 一道浅墨水带，上面顺流移动的短水纹；回湾画成转动的旋纹；上岸处到墨印的一段用淡点标出。
+  // glow：0 时只留淡淡的水带，有墨妖将至或在水上时显出流向。
+  const WATER = '40,52,62';
+  function lineLen(P) {
+    const acc = [0];
+    for (let i = 1; i < P.length; i++) acc.push(acc[i - 1] + Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y));
+    return acc;
+  }
+  function pointAt(P, acc, d) {
+    let i = 1;
+    while (i < P.length - 1 && acc[i] < d) i++;
+    const a = P[i - 1], b = P[i], seg = acc[i] - acc[i - 1] || 1, t = Math.max(0, Math.min(1, (d - acc[i - 1]) / seg));
+    const l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, tx: (b.x - a.x) / l, ty: (b.y - a.y) / l };
+  }
+  function polyStroke(c, P) {
+    c.beginPath(); c.moveTo(P[0].x, P[0].y);
+    for (let i = 1; i < P.length; i++) c.lineTo(P[i].x, P[i].y);
+  }
+  function drawRiver(c, R, t, glow, cx, cy) {
+    const P = R.line, acc = R.acc || (R.acc = lineLen(P)), total = acc[acc.length - 1];
+    const g = Math.max(0, Math.min(1, glow));
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    // 水带
+    polyStroke(c, P);
+    c.strokeStyle = `rgba(${WATER},${0.045 + 0.05 * g})`; c.lineWidth = 46; c.stroke();
+    c.strokeStyle = `rgba(${WATER},${0.035 + 0.04 * g})`; c.lineWidth = 18; c.stroke();
+    // 顺流的水纹：两道，错开；入湾前的一段渐隐
+    const gap = 42, off = (t * 64) % gap, endFade = R.eddy ? R.eddy.r + 20 : 50;
+    c.lineWidth = 1.7;
+    for (let k = 0, d = off; d < total; d += gap, k++) {
+      const q = pointAt(P, acc, d);
+      const fade = Math.min(1, d / 60) * Math.max(0, Math.min(1, (total - d) / endFade));
+      const a = (0.1 + 0.42 * g) * fade;
+      if (a < 0.02) continue;
+      const lane = k % 2 ? 9 : -9, nx = -q.ty, ny = q.tx, x = q.x + nx * lane, y = q.y + ny * lane, h = 3.5;
+      c.strokeStyle = `rgba(${WATER},${a})`;
+      c.beginPath(); c.moveTo(x - q.tx * 10, y - q.ty * 10);
+      c.quadraticCurveTo(x + nx * h, y + ny * h, x + q.tx * 10, y + q.ty * 10); c.stroke();
+    }
+    // 回湾：一汪浅水，三道旋纹顺水势转
+    if (R.eddy) {
+      const E = R.eddy;
+      c.fillStyle = `rgba(${WATER},${0.05 + 0.05 * g})`;
+      c.beginPath(); c.arc(E.x, E.y, E.r + 8, 0, Math.PI * 2); c.fill();
+      for (let k = 0; k < 3; k++) {
+        const r = E.r * (0.32 + 0.3 * k), a0 = t * (1.5 - k * 0.3) * E.dir + k * 2.1;
+        c.strokeStyle = `rgba(${WATER},${0.09 + 0.36 * g})`; c.lineWidth = 2 - k * 0.3;
+        c.beginPath(); c.arc(E.x, E.y, r, a0, a0 + 4.2 * E.dir, E.dir < 0); c.stroke();
+      }
+    }
+    // 出湾 / 上岸之后：淡点标出去向，直到墨印
+    const dots = (R.outLine || [R.end]).concat([{ x: cx, y: cy }]);
+    const dacc = lineLen(dots), dl = dacc[dacc.length - 1] - 44;
+    c.fillStyle = `rgba(${WATER},${0.05 + 0.2 * g})`;
+    for (let d = R.eddy ? R.eddy.r + 6 : 14; d < dl; d += 16) {
+      const q = pointAt(dots, dacc, d);
+      c.beginPath(); c.arc(q.x, q.y, 1.8, 0, Math.PI * 2); c.fill();
+    }
+    c.restore();
+  }
+
   function drawShot(c, s) {
     const a = Math.atan2(s.vy, s.vx);
     c.save(); c.translate(s.x, s.y); c.rotate(a);
-    c.fillStyle = `rgba(${INK},0.92)`;
-    c.beginPath(); c.arc(0, 0, s.r, -Math.PI / 2, Math.PI / 2); c.quadraticCurveTo(-s.r * 2.6, s.r * 0.2, -s.r * 3.2, 0); c.quadraticCurveTo(-s.r * 2.6, -s.r * 0.2, 0, -s.r); c.fill();
-    c.fillStyle = `rgba(${CINNABAR},0.6)`; c.beginPath(); c.arc(s.r * 0.15, 0, s.r * 0.4, 0, TAU); c.fill();
+    // 回澜倒卷的墨弹：水色，芯留白，拖得更长
+    const tail = s.rev ? 4.4 : 3.2;
+    c.fillStyle = s.rev ? `rgba(${WATER},0.9)` : `rgba(${INK},0.92)`;
+    c.beginPath(); c.arc(0, 0, s.r, -Math.PI / 2, Math.PI / 2); c.quadraticCurveTo(-s.r * 2.6, s.r * 0.2, -s.r * tail, 0); c.quadraticCurveTo(-s.r * 2.6, -s.r * 0.2, 0, -s.r); c.fill();
+    c.fillStyle = s.rev ? `rgba(${PAPER},0.85)` : `rgba(${CINNABAR},0.6)`; c.beginPath(); c.arc(s.r * 0.15, 0, s.r * 0.4, 0, TAU); c.fill();
+    c.restore();
+  }
+
+  // —— 山口（卷一 · 远山 · 其二）——
+  // 口两侧各一座小山（总是在，淡淡的）；有墨妖将至或正在口里时，来路的墨点虚线浓起来、缓缓向前走
+  function drawPeak(c, x, y, h, lean, a) {
+    const w = h * 0.72, top = x + lean * h * 0.14;
+    const g = c.createLinearGradient(0, y - h * 0.65, 0, y + h * 0.35);
+    g.addColorStop(0, `rgba(${INK},${0.34 * a})`); g.addColorStop(1, `rgba(${INK},${0.03 * a})`);
+    c.fillStyle = g;
+    c.beginPath(); c.moveTo(x - w, y + h * 0.35);
+    c.quadraticCurveTo(x - w * 0.38, y - h * 0.18, top, y - h * 0.65);
+    c.quadraticCurveTo(x + w * 0.42, y - h * 0.1, x + w, y + h * 0.35); c.closePath(); c.fill();
+    // 一道皴笔：山脊
+    c.strokeStyle = `rgba(${INK},${0.42 * a})`; c.lineWidth = 1.6;
+    c.beginPath(); c.moveTo(top, y - h * 0.65); c.quadraticCurveTo(x - w * 0.12, y - h * 0.1, x - w * 0.48, y + h * 0.3); c.stroke();
+  }
+  function drawPass(c, R, t, glow, cx, cy) {
+    const P = R.line, acc = R.acc || (R.acc = lineLen(P)), total = acc[acc.length - 1];
+    const g = Math.max(0, Math.min(1, glow));
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    // 来路
+    polyStroke(c, P);
+    c.setLineDash([9, 13]); c.lineDashOffset = -t * 26;
+    c.strokeStyle = `rgba(${INK},${0.05 + 0.3 * g})`; c.lineWidth = 2.2; c.stroke();
+    c.setLineDash([]);
+    // 出了山口：淡点到墨印
+    const dots = [R.end, { x: cx, y: cy }], dacc = lineLen(dots), dl = dacc[1] - 44;
+    c.fillStyle = `rgba(${INK},${0.04 + 0.16 * g})`;
+    for (let d = 14; d < dl; d += 16) { const q = pointAt(dots, dacc, d); c.beginPath(); c.arc(q.x, q.y, 1.8, 0, TAU); c.fill(); }
+    // 口两侧的山
+    const q = pointAt(P, acc, Math.min(46, total * 0.3)), nx = -q.ty, ny = q.tx, a = 0.75 + 0.25 * g;
+    const seed = R.key.charCodeAt(R.key.length - 1);
+    drawPeak(c, q.x + nx * 62, q.y + ny * 62, 74 + (seed % 3) * 8, (seed % 2) * 2 - 1, a);
+    drawPeak(c, q.x - nx * 62, q.y - ny * 62, 86 - (seed % 3) * 6, (seed % 2) ? -1 : 1, a);
+    c.restore();
+  }
+
+  // —— 月影（卷三 · 夜月 · 其一）——
+  // k：0 刚浮出 → 1 现身。月影渐浓，外圈刻度走满；将现之际朱圈一闪。中间一弯新月
+  function drawMoon(c, x, y, k, t, n) {
+    const R = 18 + 8 * Math.min(n, 4) / 4 + 10 * k;
+    c.save();
+    const g = c.createRadialGradient(x, y, 0, x, y, R * 1.6);
+    g.addColorStop(0, `rgba(${INK},${0.1 + 0.34 * k})`); g.addColorStop(0.6, `rgba(${INK},${0.05 + 0.16 * k})`); g.addColorStop(1, `rgba(${INK},0)`);
+    c.fillStyle = g; c.beginPath(); c.ellipse(x, y, R * 1.6, R * 1.15, 0, 0, TAU); c.fill();
+    c.strokeStyle = `rgba(${INK},${0.12 + 0.12 * k})`; c.lineWidth = 1;
+    c.beginPath(); c.arc(x, y, R + 8, 0, TAU); c.stroke();
+    c.strokeStyle = `rgba(${INK},${0.25 + 0.55 * k})`; c.lineWidth = 2.4; c.lineCap = 'round';
+    c.beginPath(); c.arc(x, y, R + 8, -Math.PI / 2, -Math.PI / 2 + TAU * k); c.stroke();
+    if (k > 0.8) {
+      c.strokeStyle = `rgba(${CINNABAR},${(k - 0.8) * 4 * (0.55 + 0.45 * Math.sin(t * 18))})`; c.lineWidth = 2;
+      c.beginPath(); c.arc(x, y, R + 13, 0, TAU); c.stroke();
+    }
+    c.fillStyle = `rgba(${INK},${0.35 + 0.5 * k})`; c.beginPath(); c.arc(x, y, 6.5, 0, TAU); c.fill();
+    c.fillStyle = `rgba(${PAPER},0.96)`; c.beginPath(); c.arc(x + 2.8, y - 1.8, 5.6, 0, TAU); c.fill();
+    if (n > 1) { c.fillStyle = `rgba(${INK},${0.4 + 0.4 * k})`; c.font = `600 12px serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('×' + n, x, y + R + 22); }
     c.restore();
   }
 
@@ -770,5 +892,5 @@ var Art = (function () {
     brush(c, pts, alpha, col, 0);
   }
 
-  return { makeCanvas, buildPaper, buildSeal, nameSeal, drawBrush, brush, strokeFromLine, drawEnemy, drawChain, drawShot, drawDrop, drawIcon, blobPath, roundRect, inkGrad };
+  return { makeCanvas, buildPaper, buildSeal, nameSeal, drawBrush, brush, strokeFromLine, drawEnemy, drawChain, drawShot, drawDrop, drawIcon, blobPath, roundRect, inkGrad, drawRiver, drawPass, drawMoon };
 })();

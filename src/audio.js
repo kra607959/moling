@@ -239,6 +239,41 @@ var Sound = (function () {
       const o = osc('sine', 1100, t, 0.1); o.frequency.exponentialRampToValueAtTime(700, t + 0.08);
       const g2 = gainEnv(t, 0.12, 0.002, 0.08); o.connect(g2); route(g2, pan, 0.1);
     },
+    // 墨蟾蓄力：干短的一声「咕」，比出弹的「噗」高、短，提前约半秒
+    charge(pan) {
+      if (!ac) return; const t = T();
+      const o = osc('triangle', 200, t, 0.18); o.frequency.exponentialRampToValueAtTime(340, t + 0.12);
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1100;
+      const g = gainEnv(t, 0.26, 0.006, 0.13); o.connect(lp); lp.connect(g); route(g, pan, 0.06);
+      const n = noiseSrc(t, 0.05); const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 650; bp.Q.value = 2;
+      const g2 = gainEnv(t, 0.14, 0.002, 0.04); n.connect(bp); bp.connect(g2); route(g2, pan, 0);
+    },
+    // 截弹：断弦 —— 高处一拨，音高猛落，加一声脆响（与纸人出手的「cut」分开）
+    snap(pan) {
+      if (!ac) return; const t = T();
+      const o = osc('sawtooth', 1600, t, 0.14); o.frequency.exponentialRampToValueAtTime(240, t + 0.1);
+      const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1300; bp.Q.value = 1.1;
+      const g = gainEnv(t, 0.17, 0.001, 0.1); o.connect(bp); bp.connect(g); route(g, pan, 0.12);
+      const n = noiseSrc(t, 0.03); const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 4500;
+      const g2 = gainEnv(t, 0.32, 0.001, 0.025); n.connect(hp); hp.connect(g2); route(g2, pan, 0.05);
+      pluckF(freqOf(16), 0.11, pan, 0.25);
+    },
+    // 群封：一笔封住数妖，合成一声成组的和弦（3–4 / 5–7 / 8 只以上三档），代替一只只各拨一声
+    chord(n, pan) {
+      if (!ac) return;
+      const tier = n >= 8 ? 3 : n >= 5 ? 2 : 1;
+      const degs = tier === 3 ? [5, 7, 9, 10, 12, 14] : tier === 2 ? [5, 7, 9, 10, 12] : [5, 7, 10];
+      degs.forEach((d, k) => pluckF(freqOf(d), 0.25 - k * 0.012, (k / (degs.length - 1) - 0.5) * 0.7 + (pan || 0) * 0.3, 0.6, k * 0.03));
+      if (tier >= 2) api.bell(15, 0.13);
+      if (tier >= 3) api.gong(freqOf(0), 0.3, 1.6);
+    },
+    // 底乐让路：大动静时把音乐（拨弦、持续音）短暂压低，再慢慢回来
+    duck(level, dur) {
+      if (!ac || !mus) return; const t = T(), full = BASE.mus * vol.mus, g = mus.gain;
+      g.cancelScheduledValues(t); g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(full * level, t + 0.06);
+      g.setTargetAtTime(full, t + dur, 0.35);
+    },
     spit(pan) {
       if (!ac) return; const t = T();
       const n = noiseSrc(t, 0.16); const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;

@@ -7,6 +7,9 @@ var Gesture = (function () {
   const CORNER_K = 3;           // 拐角检测窗口（点数）
   const CORNER_OPEN = 1.4;      // 开放笔画的拐角阈值（弧度，约 80°）
   const CORNER_LOOP = 0.85;     // 闭合图形的拐角阈值（约 49°）
+  const SPAN = 28;              // 弯的跨度（转过七成角所用笔长）低于此为折角
+  const GAP_FAR = 70;           // 弯距超过此，才用跨度分折线与波浪
+  const BEND_PART = 0.7;        // 量弯的跨度：转过本弯多少成的角
 
   function resample(raw, step) {
     if (!raw.length) return [];
@@ -136,6 +139,96 @@ var Gesture = (function () {
     return runs;
   }
 
+  // 各个「弯」：同向转动的一段（抖动造成的小段并入两邻）。每个弯记下转角最集中的跨度：
+  // 折线的弯集中在一两个点上（尖），波浪的弯摊在半个波长上（圆）。用「跨度 ÷ 弯距」量尖圆，
+  // 不依赖拐角的度数阈值——手指画得快、拐角只转七八十度时，旧的拐角检测常常漏掉，锯齿就被当成了波浪。
+  function bendList(P, L) {
+    const n = P.length;
+    if (n < 6) return [];
+    // 先把点的位置抹平（±2 点，约 ±12 单位），压住手抖，再取航向
+    const W = [1, 2, 3, 2, 1], Q = P.map((_, i) => {
+      let x = 0, y = 0, w = 0;
+      for (let d = -2; d <= 2; d++) { const j = i + d; if (j < 0 || j >= n) continue; x += P[j].x * W[d + 2]; y += P[j].y * W[d + 2]; w += W[d + 2]; }
+      return { x: x / w, y: y / w };
+    });
+    const s = [];
+    for (let i = 0; i < n - 1; i++) s.push(Math.atan2(Q[i + 1].y - Q[i].y, Q[i + 1].x - Q[i].x));
+    for (let i = 1; i < s.length; i++) s[i] = s[i - 1] + wrapAng(s[i] - s[i - 1]);
+    let runs = [];
+    for (let i = 1; i < s.length; i++) {
+      const d = s[i] - s[i - 1], cur = runs[runs.length - 1];
+      if (cur && (Math.sign(d) === Math.sign(cur.t) || Math.abs(d) < 0.004 || cur.t === 0)) { cur.t += d; cur.b = i; }
+      else runs.push({ a: i - 1, b: i, t: d });
+    }
+    const merge = () => {
+      const m = [];
+      for (const r of runs) { const q = m[m.length - 1]; if (q && Math.sign(r.t) === Math.sign(q.t)) { q.t += r.t; q.b = r.b; } else m.push(r); }
+      runs = m;
+    };
+    merge();
+    for (;;) {
+      if (runs.length <= 1) break;
+      let mi = -1, mv = 0.35;
+      for (let i = 0; i < runs.length; i++) { const v = Math.abs(runs[i].t); if (v < mv) { mv = v; mi = i; } }
+      if (mi < 0) break;
+      if (mi === 0) { runs[1].t += runs[0].t; runs[1].a = runs[0].a; runs.splice(0, 1); }
+      else if (mi === runs.length - 1) { runs[mi - 1].t += runs[mi].t; runs[mi - 1].b = runs[mi].b; runs.splice(mi, 1); }
+      else { const q = runs[mi - 1]; q.t += runs[mi].t + runs[mi + 1].t; q.b = runs[mi + 1].b; runs.splice(mi, 2); }
+      merge();
+    }
+    const edge = Math.max(18, 0.08 * L) / STEP;
+    const out = [];
+    for (const r of runs) {
+      if (Math.abs(r.t) <= 0.7) continue;
+      // 最短的一段，转过本弯七成的角（末端按比例插值，精度好过一个采样间距）
+      const need = BEND_PART * Math.abs(r.t);
+      let best = r.b - r.a, bc = (r.a + r.b) / 2;
+      for (let i = r.a; i < r.b; i++) {
+        for (let j = i + 1; j <= r.b && j - 1 - i < best; j++) {
+          const got = Math.abs(s[j] - s[i]);
+          if (got < need) continue;
+          const prev = Math.abs(s[j - 1] - s[i]), f = got > prev ? (need - prev) / (got - prev) : 1;
+          const w = j - 1 - i + f;
+          if (w < best) { best = w; bc = i + w / 2; }
+          break;
+        }
+      }
+      if (bc < edge || bc > n - 1 - edge) continue;   // 起笔、收笔处的小勾不算弯
+      out.push({ i: Math.round(bc), t: r.t, span: best * STEP });
+    }
+    // 尖度：每个弯的跨度 ÷ 与相邻弯的平均距离
+    for (let k = 0; k < out.length; k++) {
+      const ds = [];
+      if (k > 0) ds.push(out[k].i - out[k - 1].i);
+      if (k < out.length - 1) ds.push(out[k + 1].i - out[k].i);
+      const gap = ds.length ? ds.reduce((x, y) => x + y, 0) / ds.length * STEP : L;
+      out[k].sharp = out[k].span / Math.max(gap, 1);
+    }
+    return out;
+  }
+
+  // 弯顶处的笔速 ÷ 全笔笔速中位数（原始点带时间 t 才算）。人有意折笔时会在拐角减速，留作校准
+  function bendSpeed(raw, bends) {
+    if (!raw.length || raw[0].t == null || raw[raw.length - 1].t - raw[0].t < 30) return null;
+    const cum = [0];
+    for (let i = 1; i < raw.length; i++) cum.push(cum[i - 1] + Math.hypot(raw[i].x - raw[i - 1].x, raw[i].y - raw[i - 1].y));
+    const tAt = l => {
+      let i = 1;
+      while (i < raw.length - 1 && cum[i] < l) i++;
+      const f = cum[i] > cum[i - 1] ? clamp((l - cum[i - 1]) / (cum[i] - cum[i - 1]), 0, 1) : 0;
+      return raw[i - 1].t + (raw[i].t - raw[i - 1].t) * f;
+    };
+    const tot = cum[cum.length - 1], H = 12;
+    const v = l => { const a = Math.max(0, l - H), b = Math.min(tot, l + H), dt = tAt(b) - tAt(a); return dt > 0 ? (b - a) / dt : null; };
+    const all = [];
+    for (let l = H; l < tot - H; l += 2 * H) { const q = v(l); if (q) all.push(q); }
+    if (all.length < 3) return null;
+    all.sort((x, y) => x - y);
+    const vm = all[all.length >> 1];
+    const at = bends.map(b => v(b.i * STEP)).filter(q => q).sort((x, y) => x - y);
+    return at.length && vm > 0 ? at[at.length >> 1] / vm : null;
+  }
+
   function lobeCount(P) {
     if (P.length < 6) return 0;
     return turnRuns(headingProfile(P)).filter(r => Math.abs(r) > 0.7).length;
@@ -209,13 +302,32 @@ var Gesture = (function () {
     const runs = prof.length ? turnRuns(prof) : [];
     res.conc = cornerConcentration(prof, runs, cs);
     res.lobes = runs.filter(r => Math.abs(r) > 0.7).length;
-    const zig = cs.length >= 2 && res.conc >= 0.6;
-    const wave = !zig && res.lobes >= 3 && res.S > 0.3;
+    // 折线还是波浪。弯与弯相距够远（> GAP_FAR）时看弯有多尖：转过七成角所用的笔长（中位数）。
+    // 手指画的折角哪怕圆一点，也在二十几个单位内转完；波浪的弯摊在半个波长上。
+    // 弯挨得近的小笔画，两种形状本就难分，仍用拐角度数加转角集中度（偏向认作浪）。
+    // 仿真手指笔迹（拐角倒圆 0–16 单位、采样间距 4–12、手抖），常规大小：锯齿认作雷约 93%、
+    // 波浪认作浪约 96%；旧法锯齿只认得出约 65%。真人的拐角还会减速，记进试玩记录（vr）待校准。
+    const bends = bendList(P, L), nb = bends.length;
+    const mid = a => a.slice().sort((x, y) => x - y)[a.length >> 1];
+    const span = nb ? mid(bends.map(b => b.span)) : 99, sh = nb ? mid(bends.map(b => b.sharp)) : 1;
+    const gap = nb >= 2 ? mid(bends.slice(1).map((b, k) => (b.i - bends[k].i) * STEP)) : 0;
+    const far = nb >= 2 && gap > GAP_FAR;
+    // 弯要铺开在笔上：直线收笔处卷个小圈，两个弯挤在末端，不算折线
+    const spread = nb >= 2 ? ((bends[nb - 1].i - bends[0].i) * STEP + gap) / L : 1;
+    const zig = spread >= 0.35 && (far ? span < SPAN : cs.length >= 2 && res.conc >= 0.6);
+    const wave = !zig && Math.max(nb, res.lobes) >= 3 && res.S > 0.3;
+    if (zig && far) res.corners = bends.map(b => P[b.i]);   // 雷从拐角落下
+    if (nb >= 2) res.bend = { n: nb, span, sharp: sh, gap, vr: bendSpeed(raw, bends) };
     res.shape = zig ? 'zig' : wave ? 'wave' : res.S >= 0.9 && L >= 50 ? 'line' : 'curve';
     if (zig && un.lei) res.kind = 'lei';
     else if (wave && un.lang) res.kind = 'lang';
     else if (res.S >= 0.9 && L >= 50) res.kind = 'zhan';
     else res.kind = 'fu';
+    // 差一点合拢：像在画圈（同向转过约 230° 以上），首尾却没接上
+    if (res.kind === 'fu' && res.shape === 'curve' && L > 120 && prof.length) {
+      const turnTot = Math.abs(prof[prof.length - 1] - prof[0]);
+      if (turnTot > 4.0 && chord < 0.5 * L) res.near = true;
+    }
     return res;
   }
 

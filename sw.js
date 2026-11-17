@@ -2,7 +2,7 @@
 // 有网时先取新文件（改了代码刷新即见），取到就顺手存一份；断网或网慢（3 秒）时用存着的。
 // 首次装上时把整套文件先存好，之后断网也能开卷。
 'use strict';
-const VERSION = 'moling-e2c0182737';   // tools/build.mjs 打包时换成内容指纹
+const VERSION = 'moling-cff01cd507';   // tools/build.mjs 打包时换成内容指纹
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest',
   'src/util.js', 'src/gesture.js', 'src/glyph.js', 'src/audio.js', 'src/art.js', 'src/data.js', 'src/scroll.js', 'src/game.js',
