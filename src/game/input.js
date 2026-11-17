@@ -227,5 +227,7 @@ function frame(now) {
   last = now;
   if (!frozen) { if (window.__bot) window.__bot.step(rdt); update(rdt); watchPerf(rdt); }
   render();
+  if (!window.__inkStarted) { window.__inkStarted = true; const el = document.getElementById('boot-err'); if (el) el.remove(); }   // 开卷了：撤掉 index.html 里的出错提示
   requestAnimationFrame(frame);
 }
+requestAnimationFrame(frame);

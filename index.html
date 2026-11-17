@@ -23,26 +23,52 @@
 </head>
 <body>
 <div id="stage"><canvas id="c"></canvas></div>
-<script src="src/util.js?v=3aaeb153c1"></script>
-<script src="src/gesture.js?v=3aaeb153c1"></script>
-<script src="src/glyph.js?v=3aaeb153c1"></script>
-<script src="src/audio.js?v=3aaeb153c1"></script>
-<script src="src/art.js?v=3aaeb153c1"></script>
-<script src="src/data.js?v=3aaeb153c1"></script>
-<script src="src/scroll.js?v=3aaeb153c1"></script>
-<script src="src/game/core.js?v=3aaeb153c1"></script>
-<script src="src/game/log.js?v=3aaeb153c1"></script>
-<script src="src/game/run.js?v=3aaeb153c1"></script>
-<script src="src/game/entity.js?v=3aaeb153c1"></script>
-<script src="src/game/stroke.js?v=3aaeb153c1"></script>
-<script src="src/game/zi.js?v=3aaeb153c1"></script>
-<script src="src/game/boss.js?v=3aaeb153c1"></script>
-<script src="src/game/update.js?v=3aaeb153c1"></script>
-<script src="src/game/draw.js?v=3aaeb153c1"></script>
-<script src="src/game/drawfx.js?v=3aaeb153c1"></script>
-<script src="src/game/hud.js?v=3aaeb153c1"></script>
-<script src="src/game/screens.js?v=3aaeb153c1"></script>
-<script src="src/game/input.js?v=3aaeb153c1"></script>
+<script>
+  // 开卷失败时把原因写在纸上（手机上看不到控制台）：脚本载入失败、启动时出错，或十五秒还没开卷。
+  // 游戏第一帧画出来后（src/game/input.js 置 __inkStarted）就撤掉。只用老写法，越老的浏览器也能跑。
+  (function () {
+    var errs = [];
+    function show() {
+      if (window.__inkStarted) return;
+      var el = document.getElementById('boot-err');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'boot-err';
+        el.style.cssText = 'position:fixed;left:20px;right:20px;top:28%;font:15px/1.8 serif;color:#3a3530;text-align:center;white-space:pre-wrap;word-break:break-all;z-index:9';
+        document.body.appendChild(el);
+      }
+      var NL = String.fromCharCode(10);
+      el.textContent = '墨灵没能开卷' + (errs.length ? '：' + NL + errs.slice(0, 4).join(NL) : '（等了十五秒还没开卷）') +
+        NL + NL + '请稍候刷新一两次；仍不行，请截图发给作者。' + NL + navigator.userAgent;
+    }
+    window.addEventListener('error', function (e) {
+      var t = e.target;
+      if (t && t.tagName === 'SCRIPT') errs.push('没能载入 ' + String(t.src).split('/').slice(-2).join('/'));
+      else errs.push((e.message || '出错') + (e.filename ? '（' + String(e.filename).split('/').pop() + ' 第 ' + e.lineno + ' 行）' : ''));
+      if (errs.length === 1) setTimeout(show, 1500);
+    }, true);
+    setTimeout(show, 15000);
+  })();
+</script>
+<script src="src/util.js?v=deb2afa841"></script>
+<script src="src/gesture.js?v=deb2afa841"></script>
+<script src="src/glyph.js?v=deb2afa841"></script>
+<script src="src/audio.js?v=deb2afa841"></script>
+<script src="src/art.js?v=deb2afa841"></script>
+<script src="src/data.js?v=deb2afa841"></script>
+<script src="src/scroll.js?v=deb2afa841"></script>
+<script src="src/game/core.js?v=deb2afa841"></script>
+<script src="src/game/log.js?v=deb2afa841"></script>
+<script src="src/game/run.js?v=deb2afa841"></script>
+<script src="src/game/entity.js?v=deb2afa841"></script>
+<script src="src/game/stroke.js?v=deb2afa841"></script>
+<script src="src/game/zi.js?v=deb2afa841"></script>
+<script src="src/game/boss.js?v=deb2afa841"></script>
+<script src="src/game/update.js?v=deb2afa841"></script>
+<script src="src/game/draw.js?v=deb2afa841"></script>
+<script src="src/game/drawfx.js?v=deb2afa841"></script>
+<script src="src/game/hud.js?v=deb2afa841"></script>
+<script src="src/game/screens.js?v=deb2afa841"></script>
+<script src="src/game/input.js?v=deb2afa841"></script>
 <script>
   // 离线缓存：装到主屏后断网也能开卷（只在 https 或本机下生效）
   if ('serviceWorker' in navigator && window.isSecureContext) {
