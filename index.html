@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>墨灵 · Ink Spirit</title>
+<meta name="description" content="以笔为刃，以墨为命：一笔一划伏墨妖的水墨动作肉鸽。">
+<meta name="theme-color" content="#efe6d0">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="墨灵">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+  html, body { margin: 0; height: 100%; background: #efe6d0; overflow: hidden; overscroll-behavior: none; }
+  /* 画布只占安全区：刘海、圆角、底部横条处留成纸色 */
+  #stage { position: fixed; top: env(safe-area-inset-top, 0px); right: env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); left: env(safe-area-inset-left, 0px); }
+  canvas { display: block; touch-action: none; cursor: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<script src="src/util.js"></script>
+<script src="src/gesture.js"></script>
+<script src="src/glyph.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/art.js"></script>
+<script src="src/data.js"></script>
+<script src="src/scroll.js"></script>
+<script src="src/game.js"></script>
+<script>
+  // 离线缓存：装到主屏后断网也能开卷（只在 https 或本机下生效）
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
