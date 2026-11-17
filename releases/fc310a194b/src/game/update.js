@@ -286,6 +286,7 @@ function capturePanel(fell) {
   const vow = fell || G.endless ? null : G.vows.find(id => VOWS.find(v => v.id === id)?.feat?.floor === G.floor) || null;
   G.panels.push({ cv, floor: G.floor, scene: sceneOf(G.floor), flawless: G.flawless && !fell, fell: !!fell, boss: G.bossDown || null,
     feng: G.feat.feng, guard: G.feat.guard, vow });
+  if (vow) gainVowFeat(vow);   // 头一回：当场给战果，结算列入「本局新得」
   if (G.panels.length > 16) G.panels.splice(FINAL_FLOOR, 1);   // 续卷太长：略去较早的续卷段
 }
 // 评品：三卷尽净称「净卷」，正传九层里另有三层以上无瑕称「墨定」；没通关不评
@@ -347,14 +348,14 @@ function choose(i) {
   G.choices = null;
   startFloor(G.floor + 1);
 }
-function toGameOver() { screen = 'over'; UI.endT = UI.t; recordBest(); bankKills(); capturePanel(true); finishScroll('fall'); endLog('fall'); dropRun(); }
+function toGameOver() { screen = 'over'; UI.endT = UI.t; recordBest(); bankKills(); capturePanel(true); finishScroll('fall'); noteGoals(); endLog('fall'); dropRun(); }
 // 三卷尽净：局面存档撤掉，画心留着（若续卷，接着存）
 function toVictory() {
   screen = 'victory'; UI.endT = UI.t;
   // 首通：本局有哪一枚戒还没通关过（双戒通关也算两枚各通一次），或这一组双戒头一回一起通关。先看旧成绩，再记新成绩
   G.vowFirst = G.vows.length > 0 && (G.vows.some(id => !vowCleared(id)) || (G.vows.length > 1 && !profile.vowBest[G.vows.join('+')]?.won));
   if (G.log) G.log.mainCleared = true;
-  recordBest(true); finishScroll('win'); endLog('win'); dropRun(true); Sound.arpeggio(true); Sound.setAmbient(false);
+  recordBest(true); finishScroll('win'); noteGoals(); endLog('win'); dropRun(true); Sound.arpeggio(true); Sound.setAmbient(false);
 }
 function continueEndless() { G.endless = true; if (G.log) G.log.end = null; G.choices = rollUpgrades(); screen = 'choose'; snapRun('choose'); }
 function toTitle() { screen = 'title'; UI.titleT = 9; Sound.setAmbient(false); paperKey = ''; }

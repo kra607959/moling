@@ -82,10 +82,10 @@ const partCap = () => (SET.quality === 'lo' ? 260 : 700);
 // —— 印谱与笔匣（局外存档；调试模式另存一份，不碰正式存档）——
 const PROFILE_KEY = DEBUG ? 'moling.profile.debug' : 'moling.profile';
 function loadProfile() {
-  const base = { seals: {}, brush: 'jian', kills: 0, runs: 0, vowBest: {} };
+  const base = { seals: {}, brush: 'jian', kills: 0, runs: 0, vowBest: {}, vowFeats: {} };
   try {
     const p = JSON.parse(localStorage.getItem(PROFILE_KEY));
-    if (p && typeof p === 'object') return Object.assign(base, p, { seals: Object.assign({}, p.seals), vowBest: Object.assign({}, p.vowBest) });
+    if (p && typeof p === 'object') return Object.assign(base, p, { seals: Object.assign({}, p.seals), vowBest: Object.assign({}, p.vowBest), vowFeats: Object.assign({}, p.vowFeats) });
   } catch (e) { /* 忽略 */ }
   return base;
 }
@@ -102,7 +102,23 @@ function award(id) {
   if (!S) return;
   profile.seals[id] = Date.now();
   saveProfile();
+  if (G && G.gained) G.gained.push(id);   // 结算「本局新得」
   UI.toasts.push({ S, t: 0 });
+  Sound.stamp(); Sound.bell(12, 0.2);
+}
+// 戒印分段战果：立戒头一回净了该戒改动最大的那一层。0.6.4 以前的存档按戒印最远层数补认
+function vowFeatDone(id) {
+  const V = VOWS.find(v => v.id === id);
+  if (!V || !V.feat || profile.vowFeats[id]) return true;
+  return Object.entries(profile.vowBest).some(([key, row]) => key.split('+').includes(id) && (row.won || row.floor > V.feat.floor));
+}
+function gainVowFeat(id) {
+  if (vowFeatDone(id)) return;
+  const V = VOWS.find(v => v.id === id);
+  profile.vowFeats[id] = Date.now();
+  saveProfile();
+  if (G && G.gained) G.gained.push('vow:' + id);
+  UI.toasts.push({ S: { ch: V.name, title: '戒印战果 · ' + V.feat.name, cond: `立${V.name}戒，净第${cnNum(V.feat.floor)}层` }, t: 0 });
   Sound.stamp(); Sound.bell(12, 0.2);
 }
 // 本局伏妖数并入累计（每清一层、每局终了各记一次）

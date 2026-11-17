@@ -449,7 +449,7 @@ function drawToasts() {
   const s = 46, st = clamp((T.t - 0.15) / 0.25, 0, 1), sc = lerp(1.6, 1, easeOut(st));
   ctx.save(); ctx.translate(x + 36, y + h / 2); ctx.rotate(-0.05); ctx.scale(sc, sc);
   ctx.globalAlpha *= st; ctx.drawImage(sealArt(T.S.ch, 128, { seed: 9 }), -s / 2, -s / 2, s, s); ctx.restore();
-  txt(`印谱 · ${T.S.ch}`, x + 70, y + 22, 18, INK, 'left');
+  txt(T.S.title || `印谱 · ${T.S.ch}`, x + 70, y + 22, 18, INK, 'left');
   if (T.S.brush) txt(`得笔：${BRUSHES[T.S.brush].name} —— 卷首笔匣可选`, x + 70, y + 46, 13, CINNABAR, 'left', 0.95, 'normal');
   else if (T.S.insight) txt('新心得已得 · 下局可直接试帖', x + 70, y + 46, 13, CINNABAR, 'left', 0.95, 'normal');
   else txt(T.S.cond, x + 70, y + 46, 13, INK, 'left', 0.7, 'normal');

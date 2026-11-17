@@ -70,8 +70,9 @@ function blankRun(brush) {
     log: null, flog: null, panelSeq: 0, resumedFloor: false,
     floorName: null, riverDef: null, rivers: null, groups: {}, restAt: null, segCap: null,
     tideLanes: [], inkBackAt: -99, flowUntil: 0,
-    feat: { feng: 0, guard: 0 },   // 本层战果：一笔封杀最多几只、笔下处理掉几发正要撞印的墨弹（裱卷时挑最好的一段落印）
+    feat: { feng: 0, guard: 0 },   // 本层战果：一笔封杀最多几只、截下几发冲着印来的墨弹（裱卷时挑最好的一段落印）
     vowFirst: false,               // 这一组戒印头一回通关（题跋写「首通」）
+    gained: [], bestAt: 0, goals: null,   // 本局新得的印与戒印战果、开局时的同规则最佳分、结算的目标
   };
 }
 function newRun(seed, vows, tryFlow) {
@@ -88,6 +89,7 @@ function newRun(seed, vows, tryFlow) {
   G = blankRun(brush);
   G.vows = vowsOpen() ? vowIds(vows) : [];
   G.tryFlow = !!tryFlow && flowOpen();
+  G.bestAt = G.vows.length ? (profile.vowBest[G.vows.join('+')]?.score || 0) : best.score;
   G.up = Object.assign({}, BR().up);
   G.ink = inkMax();
   askPersist();

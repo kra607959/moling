@@ -115,7 +115,7 @@ function clearRecords() {
 // —— 局中存档：第二层起每层开头、择心得时各存一份。页面被系统收走后，卷首可「接着画」（从那一层开头重来）。
 // 局面只存要紧的数（印力、心得、分数、笔意……）；已截下的画心另存进 IndexedDB，接着画时画卷不缺段。
 const RUN_KEY = DEBUG ? 'moling.run.debug' : 'moling.run';
-const RUN_FIELDS = ['brush', 'vows', 'tryFlow', 'flowShown', 'earnedFlow', 'vowFirst', 'runId', 'floor', 'time', 'score', 'combo', 'comboT', 'maxCombo', 'sealHp', 'sealMax', 'up', 'yi', 'stats', 'ziSet', 'ziTaught', 'endless', 'banked', 'log'];
+const RUN_FIELDS = ['brush', 'vows', 'tryFlow', 'flowShown', 'earnedFlow', 'vowFirst', 'gained', 'bestAt', 'runId', 'floor', 'time', 'score', 'combo', 'comboT', 'maxCombo', 'sealHp', 'sealMax', 'up', 'yi', 'stats', 'ziSet', 'ziTaught', 'endless', 'banked', 'log'];
 function loadPending() {
   try {
     const r = JSON.parse(localStorage.getItem(RUN_KEY));
