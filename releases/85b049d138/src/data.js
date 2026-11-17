@@ -2,11 +2,12 @@
 // 静态数据：墨妖、笔法、心得（升级）、卷与层的编排。
 
 // 版本号：写进试玩记录与局中存档，卷首右下角也标出；每次发给试玩者之前改一次
-var GAME_VERSION = '0.6.2';
+var GAME_VERSION = '0.6.3';
 
 var VOWS = [
-  { id: 'ink', name: '惜墨', tag: '截弹／团封', detail: '自然回墨少两成；截威胁弹或封点伏三妖，返墨。', regen: 0.8 },
-  { id: 'tide', name: '催潮', tag: '变阵', detail: '第 2 层两口夹阵，第 5 层逆水开汊；留白不变。' },
+  // feat：立此戒净了它改动最大的那一层，画卷那一段钤戒名、题这四个字
+  { id: 'ink', name: '惜墨', tag: '截弹／团封', detail: '自然回墨少两成；截威胁弹或封点伏三妖，返墨。', regen: 0.8, feat: { floor: 3, name: '惜墨伏蛟' } },
+  { id: 'tide', name: '催潮', tag: '变阵', detail: '第 2 层两口夹阵，第 5 层逆水开汊；留白不变。', feat: { floor: 5, name: '催潮过渡' } },
 ];
 const vowIds = ids => Array.isArray(ids) ? VOWS.filter(v => ids.includes(v.id)).map(v => v.id) : [];
 const vowNames = ids => VOWS.filter(v => ids?.includes(v.id)).map(v => v.name).join(' · ');

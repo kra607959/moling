@@ -73,6 +73,9 @@ var Scroll = (function () {
     if (rec.endless) L.push(`续卷至第${cnNum(rec.floor - FINAL_FLOOR)}层` + (rec.end === 'fall' ? '而印碎' : ''));
     else if (rec.end === 'win') L.push('三卷墨妖尽伏　画卷复净');
     else L.push('印碎于' + placeName(rec.floor));
+    // 立戒通关：双戒或单戒伏魇；这一组戒头一回通关记「首通」
+    if (rec.vows?.length && rec.rating) L.push((rec.vows.length > 1 ? '双戒伏魇' : `立${vowNames(rec.vows)}戒伏魇`) + (rec.vowFirst ? '　首通' : ''));
+    if (rec.rating) L.push('品曰' + rec.rating);
     L.push('得分' + cnBig(rec.score));
     L.push(dateCn(rec.date));
     // 超长一行折成几列
@@ -81,8 +84,23 @@ var Scroll = (function () {
     return cols;
   }
 
+  // 一卷只突出几件真战果，不盖满纸红印：群封（一笔封五妖以上）、截弹（护印三发以上）各挑最好的一段，
+  // 一样好取先达成的；立戒净了该戒改动的那一层，那一段钤戒名
+  function featMarks(panels) {
+    const best = (k, min) => panels.reduce((bi, p, i) => ((p[k] || 0) >= min && (bi < 0 || p[k] > panels[bi][k]) ? i : bi), -1);
+    const out = panels.map(() => []);
+    const f = best('feng', 5), g = best('guard', 3);
+    if (f >= 0) out[f].push({ seal: '群封', note: `一笔封${cnNum(panels[f].feng)}妖`, seed: 31, bai: true });
+    if (g >= 0) out[g].push({ seal: '截弹', note: `护印${cnNum(panels[g].guard)}发`, seed: 37, bai: false });
+    panels.forEach((p, i) => {
+      const V = p.vow && VOWS.find(v => v.id === p.vow);
+      if (V && V.feat) out[i].push({ seal: V.name, note: V.feat.name, seed: 41, bai: true });
+    });
+    return out;
+  }
+
   // 一段画心：纸（该层底景）+ 墨迹 + 题注与印
-  function panelArt(p, isLeftmost, gameSeal, moon) {
+  function panelArt(p, isLeftmost, gameSeal, moon, marks) {
     const cv = Art.makeCanvas(PW, PH), c = cv.getContext('2d');
     c.drawImage(scenePaper(p.scene, p.floor, moon), 0, 0);
     c.drawImage(p.cv, 0, 0, PW, PH);
@@ -97,6 +115,12 @@ var Scroll = (function () {
       stampAt(c, gameSeal, PW / 2, PH / 2, 52, 0.18, 0.55);
       stampAt(c, Art.nameSeal('碎', 46, { seed: 5 }), PW / 2 + 44, PH / 2 + 40, 46, -0.2, 0.9);
     }
+    // 战果落在画心左下（避开左缘交融处），题字在上、印在下
+    (marks || []).forEach((m, i) => {
+      const x = OV + 34 + i * 62, sy = PH - 46;
+      vtext(c, m.note, x, sy - 30 - Array.from(m.note).length * 17, 15, 17, INK, 0.66);
+      stampAt(c, Art.nameSeal(m.seal, 40, { seed: m.seed + p.floor, bai: m.bai }), x, sy, 40, i % 2 ? -0.05 : 0.04, 0.9);
+    });
     // 与左侧一段交融：左缘渐隐
     if (!isLeftmost) {
       c.globalCompositeOperation = 'destination-in';
@@ -141,10 +165,10 @@ var Scroll = (function () {
     x += CW + GS;
     // 画心：右起第一层，向左渐次
     const paintX = x;
-    const moonAt = panels.findIndex(p => p.scene === 3);
+    const moonAt = panels.findIndex(p => p.scene === 3), marks = featMarks(panels);
     for (let i = n - 1; i >= 0; i--) {
       const px = paintX + (n - 1 - i) * (PW - OV);
-      c.drawImage(panelArt(panels[i], i === n - 1, gameSeal, i === moonAt), px, py);
+      c.drawImage(panelArt(panels[i], i === n - 1, gameSeal, i === moonAt, marks[i]), px, py);
     }
     edgeLines(c, paintX, py, PAINT, PH);
     x += PAINT + GS;
@@ -163,6 +187,13 @@ var Scroll = (function () {
     stampAt(c, Art.nameSeal(B.name, 40, { seed: 3 }), cx, py + PH * 0.46 + 3 * LEAD + 26, 40, 0.03, 0.9);
     stampAt(c, gameSeal, cx, py + PH * 0.46 + 3 * LEAD + 74, 40, -0.05, 0.85);
     (rec.zi || []).forEach((k, i) => stampAt(c, Art.nameSeal(ZI[k].ch, 28, { bai: i % 2 === 1, seed: 20 + i }), colX + 30 + i * 0, py + PH - 40 - i * 34, 28, (i % 2 ? -0.06 : 0.05), 0.85));
+    // 评品与戒印签：拖尾左上，和题跋、字诀小印分开
+    let sy = py + 62;
+    if (rec.rating) { stampAt(c, Art.nameSeal(rec.rating, 60, { seed: 51 }), colX + 46, sy, 60, -0.04, 0.92); sy += 76; }
+    (rec.vows || []).forEach((id, i) => {
+      const V = VOWS.find(v => v.id === id);
+      if (V) { stampAt(c, Art.nameSeal(V.name, 40, { bai: false, seed: 53 + i }), colX + 46, sy, 40, i ? 0.05 : -0.03, 0.88); sy += 50; }
+    });
     // 轴与天杆
     drawRoller(c, M, M, ROLL, BODY + 2 * KNOB, KNOB);
     drawStave(c, bx1, by, STAVE, BODY);
@@ -265,5 +296,5 @@ var Scroll = (function () {
     return `墨灵图-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.jpg`;
   }
 
-  return { compose, store, list, remove, loadImage, download, fileName, toBlob, dateCn, placeName, PW, PH, WORLD_W, WORLD_H };
+  return { compose, store, list, remove, loadImage, download, fileName, toBlob, dateCn, placeName, featMarks, colophonLines, PW, PH, WORLD_W, WORLD_H };
 })();
