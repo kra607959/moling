@@ -2,7 +2,14 @@
 // 静态数据：墨妖、笔法、心得（升级）、卷与层的编排。
 
 // 版本号：写进试玩记录与局中存档，卷首右下角也标出；每次发给试玩者之前改一次
-var GAME_VERSION = '0.4.4';
+var GAME_VERSION = '0.6.1';
+
+var VOWS = [
+  { id: 'ink', name: '惜墨', tag: '截弹／团封', detail: '自然回墨少两成；截威胁弹或封点伏三妖，返墨。', regen: 0.8 },
+  { id: 'tide', name: '催潮', tag: '变阵', detail: '第 2 层两口夹阵，第 5 层逆水开汊；留白不变。' },
+];
+const vowIds = ids => Array.isArray(ids) ? VOWS.filter(v => ids.includes(v.id)).map(v => v.id) : [];
+const vowNames = ids => VOWS.filter(v => ids?.includes(v.id)).map(v => v.name).join(' · ');
 
 var CN = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 function cnNum(n) {
@@ -59,6 +66,7 @@ var SEALS = [
   { id: 'fumu',    ch: '伏母', cond: '伏蠹母', brush: 'dou' },
   { id: 'kubi',    ch: '枯笔', cond: '墨不足两成，一笔伏三妖', brush: 'tu' },
   { id: 'fuyan',   ch: '伏魇', cond: '伏墨魇，三卷尽净' },
+  { id: 'liuhen',  ch: '流痕', cond: '立至少一枚戒印，净第六层', insight: '流痕' },
   { id: 'wuxia',   ch: '无瑕', cond: '一局之中三层无瑕' },
   { id: 'lianzhu', ch: '连珠', cond: '连击五十' },
   { id: 'sizi',    ch: '四字', cond: '一局之中写遍火山水人' },
@@ -89,6 +97,7 @@ function cnBig(n) {
 var UPGRADES = [
   { id: 'lei',  ch: '雷', name: '折笔 · 雷', desc: '习得「雷」：画锯齿折线，召雷劈向附近墨妖', max: 1, unlock: true },
   { id: 'lang', ch: '浪', name: '波磔 · 浪', desc: '习得「浪」：画起伏波浪，推开墨妖、伤其一点，墨弹倒卷回去打妖', max: 1, unlock: true },
+  { id: 'liuhen', ch: '痕', name: '回澜 · 流痕', desc: '浪倒卷墨弹后，五秒内下一次轻点无需蓄力，直接铺开中档墨晕', max: 1, req: 'lang', seal: 'liuhen' },
   { id: 'zhen', ch: '镇', name: '三才 · 镇', desc: '习得「镇」：画闭合三角，结成结界，阻弹、迟滞、灼伤', max: 1, unlock: true },
   { id: 'nong', ch: '浓', name: '浓墨', desc: '笔锋触敌伤害 +1', max: 2 },
   { id: 'yan',  ch: '砚', name: '大砚', desc: '墨上限 +25', max: 3 },
@@ -109,6 +118,11 @@ var UPGRADES = [
   { id: 'yiqi', ch: '意', name: '意气', desc: '笔意积攒 +40%，字诀更常可用', max: 2 },
   { id: 'kuang', ch: '狂', name: '狂草', desc: '字诀书写时限 +4 秒，成字后笔意返还两成', max: 1 },
 ];
+
+var INSIGHT_KIND = { style: '开打法', depth: '加深', aid: '救急与补缺' };
+const INSIGHT_STYLE = new Set(['lei','lang','liuhen','zhen','zi_shan','zi_shui','zi_ren','po','yuan']);
+const INSIGHT_AID = new Set(['yan','mo','xi','ding','bu']);
+function insightKind(id) { return INSIGHT_STYLE.has(id) ? 'style' : INSIGHT_AID.has(id) ? 'aid' : 'depth'; }
 
 var CHAPTERS = [
   { name: '远山', scene: 1 },
@@ -295,14 +309,19 @@ function passSpawns(t, type, n, route, gap) {
   for (let i = 0; i < n; i++) out.push({ t: t + i * (gap || 0.42), type, route, jit: rr(-4, 4) });
   return out;
 }
-function shankouFloor() {
+function shankouFloor(tide) {
   const S1 = [   // 一线：一处山口出一线墨蠹，再换一处
     ...passSpawns(0.8, 'du', 6, 'P1'),
     ...passSpawns(5.6, 'du', 6, 'P3'),
     { t: 9.0, type: 'e', side: 0, u: 0.3 },
     { t: 9.6, type: 'e', side: 2, u: 0.7 },
   ];
-  const S2 = [   // 两口：两线同时出，角度不同；墨蟾守住第三处山口
+  const S2 = tide ? [
+    { t: 0.5, type: 'chan', route: 'P2', jit: 0 },
+    ...passSpawns(1.7, 'du', 7, 'P1', 0.4),
+    ...passSpawns(3.1, 'du', 6, 'P3', 0.32),
+    ...passSpawns(7.2, 'du', 4, 'P2', 0.38),
+  ] : [   // 两口：两线同时出，角度不同；墨蟾守住第三处山口
     ...passSpawns(1.0, 'du', 6, 'P1'),
     ...passSpawns(1.6, 'du', 6, 'P2'),
     { t: 4.6, type: 'chan', route: 'P3', jit: 0 },
@@ -321,7 +340,9 @@ function shankouFloor() {
     name: '山口', rivers: PASSES, boss: null,
     waves: [
       { seg: '一线', spawns: S1, nextAt: 0, rest: 3.5, maxT: 60, hint: { icon: 'zhan', text: '山口来的墨妖排成一线 —— 顺着来路一笔斩过' } },
-      { seg: '两口', spawns: S2, nextAt: 0, rest: 3.5, maxT: 60 },
+      { seg: tide ? '夹口' : '两口', spawns: S2, nextAt: 0, rest: 3.5, maxT: 60, ...(tide ? {
+        tide: ['P1', 'P3'], hint: { icon: 'zhan', text: '墨蟾先守近口 —— 截过一弹，再顾两翼山道' },
+      } : {}) },
       { seg: '群峰', spawns: S3, nextAt: 0, maxT: 60 },
     ],
   };
@@ -371,11 +392,54 @@ function yueyingFloor() {
   };
 }
 
-function buildFloor(n) {
+// 催潮的短汊从下游逆入，和上游的虚影错拍抵印；其它段不改流路。
+const COUNTER_RIVER = { pts: [[1, 26, 192], [0.62, 0, 225], [0, 172, 198], [0, 105, 146], [0, 64, 70]] };
+function xuyingFloor(tide) {
+  return { name: '渡影', boss: null, rivers: tide ? { ...RIVERS, C: COUNTER_RIVER } : RIVERS, waves: [
+    { seg: '见影', spawns: [
+      { t:0.5, type:'xu', route:'A', jit:0 }, ...riverSpawns(4.5,'du',5,'A',0.16),
+    ], rest: 3.5, nextAt: 0, maxT: 45, hint: { icon:'feng', text:'斩线会穿过虚影 —— 用封或点，也可用雷' } },
+    { seg: '辨影', spawns: [
+      ...riverSpawns(0.5,'du',9,'A',0.2), ...riverSpawns(1.3,'xu',2,'A',0.7),
+      { t:4.0,type:'chan',side:1,u:0.5 }, { t:6.4,type:'e',side:2,u:0.28 },
+    ], rest:3.5, nextAt:0, maxT:50 },
+    tide ? { seg: '对潮', tide: ['A','C'], spawns: [
+      { t:0.9,type:'xu',route:'A',jit:0 }, { t:2.1,type:'xu',route:'A',jit:0 },
+      ...riverSpawns(3.4,'du',13,'C',0.16),
+      { t:5.2,type:'jia',route:'A',jit:0 }, { t:7.8,type:'chan',side:1,u:0.68 },
+      ...riverSpawns(9.1,'du',6,'A',0.18), { t:9.8,type:'xu',route:'C',jit:0 },
+    ], nextAt:0, maxT:55, hint: { icon:'feng', text:'虚影顺流、蠹群逆来 —— 先顾近印一路，再回笔封另一股' } } : { seg: '双流', spawns: [
+      ...riverSpawns(0.5,'du',12,'B',0.15,'shadow-b'),
+      ...riverSpawns(0.8,'xu',3,'A',1.4), ...riverSpawns(6,'du',7,'A',0.16),
+      { t:5.7,type:'jia',route:'A',jit:0 }, { t:9.0,type:'chan',side:1,u:0.7 },
+      ...riverSpawns(10.6,'du',5,'B',0.19), { t:11.1,type:'xu',route:'A',jit:0 },
+    ], nextAt:0, maxT:55 },
+  ] };
+}
+function qunyaoFloor() {
+  return { name:'群妖并至', boss:null, waves:[
+    { seg:'辨先后', spawns:[
+      moonSpawn(0.8,'du',205,260,5), moonSpawn(3.1,'lie',25,268,2), moonSpawn(5.5,'xu',270,280),
+    ], rest:3.5, nextAt:0, maxT:45, hint:{ icon:'feng', text:'月影先后生妖；裂妖子群聚成团时一圈封住', zhen:'先在最浓的月影落一座镇阵，再顾另一处' } },
+    { seg:'截来弹', spawns:[
+      moonSpawn(0.8,'chan',30,295), moonSpawn(2,'lie',200,255,2),
+      moonSpawn(5.2,'du',116,280,9), moonSpawn(7,'chan',305,290),
+    ], rest:3.5, nextAt:0, maxT:50 },
+    { seg:'三影接续', spawns:[
+      moonSpawn(0.8,'lie',35,260,2), moonSpawn(2.5,'chan',160,290,2), moonSpawn(4.5,'du',270,272,12),
+      moonSpawn(7.4,'xu',210,275,2), moonSpawn(8.6,'du',85,265,9), moonSpawn(12.2,'lie',335,265,2),
+    ], nextAt:0, maxT:60 },
+  ] };
+}
+
+function buildFloor(n, vows) {
+  const tide = vows?.includes('tide');
   if (n === 1) return tutorialFloor();
-  if (n === 2) return shankouFloor();
+  if (n === 2) return shankouFloor(tide);
   if (n === 4) return huichaoFloor();
+  if (n === 5) return xuyingFloor(tide);
   if (n === 7) return yueyingFloor();
+  if (n === 8) return qunyaoFloor();
   if (n % 3 === 0) {
     const boss = ['jiao', 'mu', 'yan'][((n / 3) - 1) % 3];
     return { waves: [{ spawns: [], nextAt: 0, maxT: 999 }], boss };

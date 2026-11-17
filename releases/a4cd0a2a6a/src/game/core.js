@@ -32,7 +32,7 @@ let G = null;             // 当前一局
 let screen = 'title';     // title | play | dying | clear | choose | pause | over | victory
 let frozen = false;
 const UI = { t: 0, titleT: 0, buttons: [], shake: 0, flash: 0, flashCol: '255,255,250', mouse: { x: -99, y: -99, in: false, isMouse: true }, toasts: [], sliders: [], slide: null, gal: null, view: null, back: 'title', drag: null };
-const META = { gallery: 1, scroll: 1, yinpu: 1, settings: 1 };   // 局外界面：卷库、观卷、印谱、设置
+const META = { gallery: 1, scroll: 1, yinpu: 1, settings: 1, vows: 1 };
 
 const CRACKS = (function () {
   const R = mulberry32(99), out = [];
@@ -56,8 +56,16 @@ function loadBest() {
   catch (e) { return { score: 0, floor: 0 }; }
 }
 let best = loadBest();
-function recordBest() {
-  if (!G || DEBUG) return;   // 调试模式（含无敌、跳关）不计入最佳
+function recordBest(won) {
+  if (!G || DEBUG) return;
+  if (G.vows.length) {
+    const key = G.vows.join('+'), old = profile.vowBest[key];
+    const next = { score: Math.max(old?.score || 0, G.score), floor: Math.max(old?.floor || 0, G.floor), won: !!(old?.won || won) };
+    if (!old || next.score !== old.score || next.floor !== old.floor || next.won !== old.won) {
+      profile.vowBest[key] = next; saveProfile();
+    }
+    return;
+  }
   best.score = Math.max(best.score, G.score);
   best.floor = Math.max(best.floor, G.floor);
   try { localStorage.setItem('moling.best', JSON.stringify(best)); } catch (e) { /* 忽略 */ }
@@ -74,10 +82,10 @@ const partCap = () => (SET.quality === 'lo' ? 260 : 700);
 // —— 印谱与笔匣（局外存档；调试模式另存一份，不碰正式存档）——
 const PROFILE_KEY = DEBUG ? 'moling.profile.debug' : 'moling.profile';
 function loadProfile() {
-  const base = { seals: {}, brush: 'jian', kills: 0, runs: 0 };
+  const base = { seals: {}, brush: 'jian', kills: 0, runs: 0, vowBest: {} };
   try {
     const p = JSON.parse(localStorage.getItem(PROFILE_KEY));
-    if (p && typeof p === 'object') return Object.assign(base, p, { seals: Object.assign({}, p.seals) });
+    if (p && typeof p === 'object') return Object.assign(base, p, { seals: Object.assign({}, p.seals), vowBest: Object.assign({}, p.vowBest) });
   } catch (e) { /* 忽略 */ }
   return base;
 }
@@ -85,6 +93,9 @@ let profile = loadProfile();
 function saveProfile() { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch (e) { /* 忽略 */ } }
 const brushOpen = id => !!BRUSHES[id] && (!BRUSHES[id].seal || !!profile.seals[BRUSHES[id].seal]);
 const sealCount = () => SEALS.filter(S => profile.seals[S.id]).length;
+const vowsOpen = () => !!profile.seals.fuyan;   // v0.5 已斩墨魇的旧存档也能直接开启
+const flowOpen = () => !!profile.seals.liuhen;
+const vowCleared = id => Object.entries(profile.vowBest).some(([key, row]) => row.won && key.split('+').includes(id));
 function award(id) {
   if (profile.seals[id]) return;
   const S = SEALS.find(x => x.id === id);

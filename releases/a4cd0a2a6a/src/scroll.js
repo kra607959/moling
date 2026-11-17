@@ -68,6 +68,7 @@ var Scroll = (function () {
   function colophonLines(rec) {
     const B = BRUSHES[rec.brush] || BRUSHES.jian;
     const L = ['右墨灵图一卷', `以${B.name}作　历${cnNum(rec.floor)}层`, `伏妖${cnBig(rec.kills)}　连击${cnBig(rec.maxCombo)}`];
+    if (rec.vows?.length) L.push('戒印　' + vowNames(rec.vows).replaceAll(' · ', '　'));
     if (rec.zi && rec.zi.length) L.push('字诀书' + rec.zi.map(k => ZI[k].ch).join(''));
     if (rec.endless) L.push(`续卷至第${cnNum(rec.floor - FINAL_FLOOR)}层` + (rec.end === 'fall' ? '而印碎' : ''));
     else if (rec.end === 'win') L.push('三卷墨妖尽伏　画卷复净');
