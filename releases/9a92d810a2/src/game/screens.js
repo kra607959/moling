@@ -11,10 +11,21 @@ function titleLayout() {
   const gap = Math.min(118, (W - 70) / BRUSH_ORDER.length);
   const L = portrait ? 120 : 116;
   const infoY = rackY + L + 34, ps = PS();
-  // 开卷按钮排在笔说明（笔名一行、说明至多三行，见 drawRack）之下，不只按屏高比例写死
-  const infoBottom = infoY + (portrait ? 22 + 27 + 2 * 18 + 8 : 22 + 34 + 2 * 22 + 8) * ps;
-  const startY = Math.max(portrait ? H * 0.81 : H * 0.865, infoBottom + 16 * ps + 25 * ps);
+  // 开卷按钮排在笔说明之下：按五支笔里说明最长的那支留位，点选别的笔时按钮不跳；
+  // 也不压到底下那行操作提示（H - 52）
+  const rows = Math.max(...BRUSH_ORDER.map(id => rackInfo(id, ps).lines.length));
+  const info = rackInfo(profile.brush, ps), lh = (ps > 1 ? 18 : 22) * ps;
+  const infoBottom = infoY + 22 * ps + info.first + (rows - 1) * lh + 8 * ps;
+  const half = 25 * ps;   // 开卷按钮半高
+  const startY = Math.min(H - 52 - 12 * ps - half, Math.max(portrait ? H * 0.81 : H * 0.865, infoBottom + 16 * ps + half));
   return { size, ty, rackY, gap, L, infoY, startY };
+}
+// 笔挂下的说明：已得的笔列手感，未得的写怎么得；drawRack 照此画，titleLayout 照此留位
+function rackInfo(id, ps) {
+  const B = BRUSHES[id], fs = 15 * ps;
+  if (brushOpen(id)) return { lines: ps > 1 ? B.perks : wrap(B.perks.join('　·　'), W - 60, fs), first: (ps > 1 ? 27 : 34) * ps };
+  const S = SEALS.find(x => x.id === B.seal);
+  return { lines: wrap(`印谱「${S.ch}」：${S.cond} —— 得印即得此笔`, W - 60, fs), first: 34 * ps };
 }
 function shownBrush() { return UI.peek && UI.t - UI.peek.t < 4 ? UI.peek.id : profile.brush; }
 function selectBrush(id) {
@@ -114,16 +125,9 @@ function drawRack(Lt, a) {
     if (a > 0.5) UI.buttons.push({ x: bx, y: by, w: bw, h: bh, fn: () => selectBrush(id) });
   });
   const B = BRUSHES[shown], open = brushOpen(shown), ps = PS(), y = Lt.infoY + 22 * ps;
-  const fs = 15 * ps, lh = (PS() > 1 ? 18 : 22) * ps;
-  if (open) {
-    txt(`${B.name}　·　${B.tag}`, CX, y, 24 * ps, INK, 'center', a);
-    const lines = ps > 1 ? B.perks : wrap(B.perks.join('　·　'), W - 60, fs);
-    lines.forEach((ln, k) => txt(ln, CX, y + (PS() > 1 ? 27 : 34) * ps + k * lh, fs, INK, 'center', 0.72 * a, 'normal'));
-  } else {
-    const S = SEALS.find(x => x.id === B.seal);
-    txt(`${B.name}　·　未得`, CX, y, 24 * ps, INK, 'center', 0.45 * a);
-    wrap(`印谱「${S.ch}」：${S.cond} —— 得印即得此笔`, W - 60, fs).forEach((ln, k) => txt(ln, CX, y + 34 * ps + k * lh, fs, INK, 'center', 0.72 * a, 'normal'));
-  }
+  const fs = 15 * ps, lh = (PS() > 1 ? 18 : 22) * ps, info = rackInfo(shown, ps);
+  txt(`${B.name}　·　${open ? B.tag : '未得'}`, CX, y, 24 * ps, INK, 'center', (open ? 1 : 0.45) * a);
+  info.lines.forEach((ln, k) => txt(ln, CX, y + info.first + k * lh, fs, INK, 'center', 0.72 * a, 'normal'));
 }
 
 // —— 印谱 ——
