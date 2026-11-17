@@ -561,7 +561,8 @@ var Art = (function () {
   }
 
   function drawMother(c, e) {
-    const x = e.x, y = e.y, r = e.r * (1 + 0.04 * Math.sin(e.t * 2.4));
+    const wk = e.windK || 0;   // 蓄墨：身子鼓起来
+    const x = e.x, y = e.y, r = e.r * (1 + 0.04 * Math.sin(e.t * 2.4) + 0.1 * wk * wk);
     // 足
     c.strokeStyle = `rgba(${INK},0.7)`; c.lineWidth = 2.4; c.lineCap = 'round';
     c.beginPath();
@@ -591,8 +592,11 @@ var Art = (function () {
       c.fillStyle = `rgb(${CINNABAR})`; c.beginPath(); c.arc(ex, ey, r * 0.05, 0, TAU); c.fill();
     }
     if (e.charging) {
-      const fx = Math.cos(e.dir), fy = Math.sin(e.dir);
-      c.fillStyle = `rgba(${CINNABAR},0.7)`; c.beginPath(); c.arc(x + fx * r * 0.88, y + fy * r * 0.88, r * 0.16, 0, TAU); c.fill();
+      // 口中朱光：随蓄墨渐大，外面一圈收拢的晕
+      const fx = Math.cos(e.dir), fy = Math.sin(e.dir), mx = x + fx * r * 0.88, my = y + fy * r * 0.88;
+      c.fillStyle = `rgba(${CINNABAR},${0.55 + 0.4 * wk})`; c.beginPath(); c.arc(mx, my, r * (0.12 + 0.18 * wk), 0, TAU); c.fill();
+      c.strokeStyle = `rgba(${CINNABAR},${0.15 + 0.45 * wk})`; c.lineWidth = 2;
+      c.beginPath(); c.arc(mx, my, r * (0.75 - 0.4 * wk), 0, TAU); c.stroke();
     }
     // 墨壳
     if (e.shell) {
@@ -784,6 +788,8 @@ var Art = (function () {
     c.fillStyle = s.rev ? `rgba(${WATER},0.9)` : `rgba(${INK},0.92)`;
     c.beginPath(); c.arc(0, 0, s.r, -Math.PI / 2, Math.PI / 2); c.quadraticCurveTo(-s.r * 2.6, s.r * 0.2, -s.r * tail, 0); c.quadraticCurveTo(-s.r * 2.6, -s.r * 0.2, 0, -s.r); c.fill();
     c.fillStyle = s.rev ? `rgba(${PAPER},0.85)` : `rgba(${CINNABAR},0.6)`; c.beginPath(); c.arc(s.r * 0.15, 0, s.r * 0.4, 0, TAU); c.fill();
+    // 首领的墨弹：一圈朱边，和满地黑墨蠹分开
+    if (s.mark && !s.rev) { c.strokeStyle = `rgba(${CINNABAR},0.8)`; c.lineWidth = 1.8; c.beginPath(); c.arc(0, 0, s.r + 2.6, 0, TAU); c.stroke(); }
     c.restore();
   }
 

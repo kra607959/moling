@@ -19,6 +19,7 @@
   const ZI_LIMIT = 9;        // 字诀书写时限（真实秒）
   const ZI_APPLY = 0.45;     // 成字后多久落下效果
   const BOSS_NAME = { jiao: '墨蛟', mu: '蠹母', yan: '墨魇' };
+  const MU_WIND = 1.3;          // 蠹母吐墨前张口蓄墨的时长（秒）：前摇与去路预示
 
   let G = null;             // 当前一局
   let screen = 'title';     // title | play | dying | clear | choose | pause | over | victory
@@ -773,8 +774,10 @@
 
   function fireShot(x, y, tx, ty, speed) {
     const dx = tx - x, dy = ty - y, d = Math.hypot(dx, dy) || 1;
-    G.shots.push({ x, y, vx: dx / d * speed, vy: dy / d * speed, r: 6, dead: false, t: 0 });
+    const sh = { x, y, vx: dx / d * speed, vy: dy / d * speed, r: 6, dead: false, t: 0 };
+    G.shots.push(sh);
     Sound.spit(panOf(x));
+    return sh;
   }
   // 回澜：墨弹倒卷，转向最近的墨妖，飞得更快，微微追着它
   function reflectShot(sh, tao) {
@@ -1530,7 +1533,9 @@
     if (!e.shell) { e.shellT -= dt; if (e.shellT <= 0) { e.shell = true; Sound.clink(panOf(e.x)); pop('壳复', e.x, e.y - e.r - 24, 16, '90,80,70', 0.8, 'num'); } }
     if (e.enter < 0.75) return;
     e.birthT -= dt;
-    if (e.birthT <= 0) {
+    e.sinceSpit = (e.sinceSpit == null ? 9 : e.sinceSpit) + dt;
+    // 留缝：产卵不与吐墨挤在一起——将吐（含张口蓄墨）前、刚吐完后都按住不产，免得两头同时要顾
+    if (e.birthT <= 0 && e.spitT > MU_WIND + 0.3 && e.sinceSpit > 0.9) {
       e.birthT = phase2 ? 5 : 6.5;
       const n = phase2 ? 5 : 4;
       for (let i = 0; i < n; i++) {
@@ -1541,16 +1546,32 @@
       Sound.spit(panOf(e.x));
     }
     e.spitT -= dt;
-    e.charging = e.spitT < 0.7;
+    // 前摇：张口蓄墨 1.3 秒——身子鼓起、口中朱光渐大，纸上先画出每一发的去路（打到印的那几道是朱色）
+    const was = e.charging;
+    e.charging = e.spitT < MU_WIND;
+    e.windK = e.charging ? clamp(1 - e.spitT / MU_WIND, 0, 1) : 0;
+    if (e.charging && !was) Sound.charge(panOf(e.x));
     if (e.spitT <= 0) {
-      e.spitT = phase2 ? 3.4 : 4.6; e.charging = false;
-      const n = phase2 ? 7 : 5, spread = phase2 ? 0.9 : 0.6;
-      const ox = e.x + Math.cos(e.dir) * e.r, oy = e.y + Math.sin(e.dir) * e.r;
-      for (let i = 0; i < n; i++) {
-        const a = e.dir + (i / (n - 1) - 0.5) * spread;
-        fireShot(ox, oy, ox + Math.cos(a) * 500, oy + Math.sin(a) * 500, 95 * sm);
+      e.spitT = phase2 ? 3.4 : 4.6; e.charging = false; e.windK = 0; e.sinceSpit = 0;
+      const v = muVolley(e);
+      for (const a of v.angs) {
+        const sh = fireShot(v.ox, v.oy, v.ox + Math.cos(a) * 500, v.oy + Math.sin(a) * 500, 95 * sm);
+        sh.r = 7; sh.mark = true;   // 蠹母的墨弹大一圈、带朱边，和满地小墨蠹分得开
       }
     }
+  }
+  // 一轮扇形墨弹的出口与各发方向（蓄墨时画去路、吐的时候发弹，用的是同一套）
+  function muVolley(e) {
+    const n = e.phase === 2 ? 7 : 5, spread = e.phase === 2 ? 0.9 : 0.6;
+    const ox = e.x + Math.cos(e.dir) * e.r, oy = e.y + Math.sin(e.dir) * e.r, angs = [];
+    for (let i = 0; i < n; i++) angs.push(e.dir + (i / (n - 1) - 0.5) * spread);
+    return { ox, oy, angs };
+  }
+  // 从 (ox, oy) 朝 a 飞的墨弹会不会打到印（山屏在时都打不到）
+  function rayHitsSeal(ox, oy, a, r) {
+    if (G.shan) return false;
+    const dx = CX - ox, dy = CY - oy, c = Math.cos(a), s = Math.sin(a);
+    return dx * c + dy * s > 0 && Math.abs(dx * s - dy * c) < SEAL_R + r * 0.5;
   }
   function summon(n) {
     const pool = ['du', 'du', 'e', 'chan', 'jia', 'xu', 'lie'];
@@ -2129,6 +2150,7 @@
     for (const k of G.counters) drawCounter(k);
     for (const d of G.drops) if (!d.dead) Art.drawDrop(c, d, t);
     drawSeal();
+    if (G.boss && G.boss.type === 'mu') drawMuAim(G.boss.e);
     if (G.shan) drawShan(G.shan);
     if (G.flood) drawFlood(G.flood);
     for (const e of G.enemies) if (!e.dead && e.type !== 'seg') Art.drawEnemy(c, e, t);
@@ -2154,6 +2176,22 @@
       c.beginPath(); c.arc(p.x, p.y, p.r, 0, TAU); c.fill();
     }
     drawPops();
+  }
+
+  // 蠹母蓄墨时的去路：虚线由口向外长出，打到印的几道朱色、偏开的淡墨；将吐前一闪
+  function drawMuAim(e) {
+    if (!e || e.dead || !e.charging || !(e.windK > 0)) return;
+    const c = ctx, k = e.windK, v = muVolley(e);
+    const L = (Math.hypot(CX - v.ox, CY - v.oy) + 90) * Math.min(1, 0.3 + k * 1.1);
+    const blink = k > 0.8 ? 0.55 + 0.45 * Math.sin(UI.t * 22) ** 2 : 1;
+    c.save(); c.lineCap = 'round'; c.setLineDash([10, 9]); c.lineDashOffset = -UI.t * 46;
+    for (const a of v.angs) {
+      const hit = rayHitsSeal(v.ox, v.oy, a, 7), fx = Math.cos(a), fy = Math.sin(a);
+      c.strokeStyle = hit ? `rgba(${CINNABAR},${(0.2 + 0.55 * k) * blink})` : `rgba(${INK},${0.07 + 0.13 * k})`;
+      c.lineWidth = hit ? 2.4 : 1.3;
+      c.beginPath(); c.moveTo(v.ox + fx * 14, v.oy + fy * 14); c.lineTo(v.ox + fx * L, v.oy + fy * L); c.stroke();
+    }
+    c.restore();
   }
 
   function drawLiveStroke(s) {
@@ -2189,6 +2227,21 @@
       const x = CX + (i - (G.sealMax - 1) / 2) * 11, y = CY + sz / 2 + 13;
       c.fillStyle = i < G.sealHp ? `rgba(${CINNABAR},0.9)` : `rgba(${CINNABAR},0.18)`;
       c.fillRect(x - 3.5, y - 3.5, 7, 7);
+    }
+    // 来弹：1.6 秒内会打到印上的墨弹，在印外对着它来的方向亮一道朱弧，越近越浓越粗
+    if (!G.shan) {
+      c.lineCap = 'round';
+      for (const s of G.shots) {
+        if (s.dead || s.rev || s.held) continue;
+        const dx = CX - s.x, dy = CY - s.y, sp = Math.hypot(s.vx, s.vy) || 1;
+        const along = (dx * s.vx + dy * s.vy) / sp;
+        if (along <= 0 || Math.abs(dx * s.vy - dy * s.vx) / sp > SEAL_R + s.r * 0.5) continue;
+        const tti = (along - SEAL_R) / sp;
+        if (tti > 1.6) continue;
+        const a = Math.atan2(-dy, -dx), w = clamp(1 - tti / 1.6, 0, 1);
+        c.strokeStyle = `rgba(${CINNABAR},${0.22 + 0.6 * w})`; c.lineWidth = 2 + 2.4 * w;
+        c.beginPath(); c.arc(CX, CY, sz * 0.8 + 9, a - 0.2, a + 0.2); c.stroke();
+      }
     }
     // 笔意：绕印一圈，满则朱红脉动
     const R = sz * 0.8, f = clamp(G.yi / YI_MAX, 0, 1), full = f >= 1;
@@ -2627,12 +2680,22 @@
     if (!b) return;
     const a = Math.min(1, b.t / 0.3) * Math.min(1, (b.dur - b.t) / 0.6);
     const y = H * 0.3;
-    const g = ctx.createLinearGradient(0, y - 90, 0, y + 90);
+    // 层首提示放不下一行（手机竖屏）就折成两行：有分号从分号处折，否则按宽度折
+    let tips = b.tip ? [b.tip] : [];
+    if (b.tip) {
+      ctx.font = `bold 18px ${FONT}`;
+      if (ctx.measureText(b.tip).width > W - 48) {
+        const k = b.tip.indexOf('；');
+        tips = k > 0 ? [b.tip.slice(0, k + 1), b.tip.slice(k + 1)] : wrap(b.tip, W - 48, 18);
+      }
+    }
+    const lo = Math.max(0, tips.length - 1) * 26;
+    const g = ctx.createLinearGradient(0, y - 90, 0, y + 90 + lo);
     g.addColorStop(0, `rgba(${PAPER},0)`); g.addColorStop(0.5, `rgba(${PAPER},${0.78 * a})`); g.addColorStop(1, `rgba(${PAPER},0)`);
-    ctx.fillStyle = g; ctx.fillRect(0, y - 90, W, 180);
+    ctx.fillStyle = g; ctx.fillRect(0, y - 90, W, 180 + lo);
     txt(b.sub, CX, y - 44, 20, INK, 'center', 0.8 * a);
     txt(b.title, CX, y + 4, 56, b.clear ? CINNABAR : INK, 'center', a);
-    if (b.tip) txt(b.tip, CX, y + 54, 18, INK, 'center', 0.85 * a);
+    tips.forEach((s, i) => txt(s, CX, y + 54 + i * 26, 18, INK, 'center', 0.85 * a));
   }
 
   function drawOverlay() {
